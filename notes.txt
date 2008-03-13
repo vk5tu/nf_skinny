@@ -1,4 +1,7 @@
-Socket buffers
+notes.txt -- Engineering notebook for nf_skinny.
+
+
+SOCKET BUFFERS
 
 See
   http://ftp.gnumonks.org/pub/doc/skb-doc.html
@@ -6,12 +9,12 @@ but this is missing more recent functions
 
 Even more annoyingly the newer functions don't have doxygen comments either.
 
-skb_header_pointer(
-
-
+skb_header_pointer() -- use the returned pointer, not the passed-in buffer.
 
 
 TESTING
+
+Testing packet interception can be done using telnet, as follows.
 
 $ make
 # make modules_install
@@ -23,4 +26,24 @@ $ make
 # modprobe nf_skinny
 # in.telnetd -debug 2000
 
-b$ telnet localhost 2000
+$ telnet localhost 2000
+
+
+COPYRIGHT
+
+Copyright © Glen David Turner of Semaphore, South Australia, 2008.
+
+This file is part of nf_skinny.
+
+nf_skinny is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 2 of the License, or (at your
+option) any later version.
+
+nf_skinny is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with nf_skinny.  If not, see <http://www.gnu.org/licenses/>.
