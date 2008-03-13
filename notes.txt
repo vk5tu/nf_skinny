@@ -1,5 +1,7 @@
 notes.txt -- Engineering notebook for nf_skinny.
 
+$Id$
+
 
 SOCKET BUFFERS
 

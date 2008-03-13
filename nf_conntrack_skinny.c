@@ -1,5 +1,7 @@
 /* nf_conntrack_skinny -- Connection tracking for Skinny.
  *
+ * $Id$
+ *
  *
  * NAMING
  *

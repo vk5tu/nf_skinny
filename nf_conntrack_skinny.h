@@ -1,5 +1,7 @@
-/* ip_conntrack_skinny.h
+/* ip_conntrack_skinny.h --
  * Protocol definitions for network address translation for Skinny.
+ *
+ * $Id$
  *
  * Copyright © Glen David Turner of Semaphore, South Australia, 2008.
  *

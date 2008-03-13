@@ -1,6 +1,9 @@
 #!/usr/bin/make -f
 #
 # Makefile -- build nf_skinny.
+#
+# $Id$
+#
 # Requires Linux kernel headers and build system to be installed.
 #
 # Copyright © Glen David Turner of Semaphore, South Australia, 2008.
