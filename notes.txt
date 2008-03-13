@@ -1,0 +1,26 @@
+Socket buffers
+
+See
+  http://ftp.gnumonks.org/pub/doc/skb-doc.html
+but this is missing more recent functions
+
+Even more annoyingly the newer functions don't have doxygen comments either.
+
+skb_header_pointer(
+
+
+
+
+TESTING
+
+$ make
+# make modules_install
+
+# iptables --append INPUT \
+  --match state --state RELATED,ESTABLISHED --jump ACCEPT
+# iptables --append INPUT --jump ACCEPT
+
+# modprobe nf_skinny
+# in.telnetd -debug 2000
+
+b$ telnet localhost 2000
