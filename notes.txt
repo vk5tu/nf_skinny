@@ -3,6 +3,39 @@ notes.txt -- Engineering notebook for nf_skinny.
 $Id$
 
 
+PACKAGES REQUIRED FOR BUILD
+
+Fedora 8
+
+    # yum install kernel-devel
+
+BUILDING
+
+    $ make
+make[1]: Entering directory `/usr/src/kernels/2.6.24.3-12.fc8-i686'
+  CC [M]  /home/gdt/nf_skinny/trunk/nf_conntrack_skinny.o
+  Building modules, stage 2.
+  MODPOST 1 modules
+  LD [M]  /home/gdt/nf_skinny/trunk/nf_conntrack_skinny.ko
+make[1]: Leaving directory `/usr/src/kernels/2.6.24.3-12.fc8-i686'
+
+    # make modules_install
+
+Sometimes
+    # depmod
+since Ubuntu sometimes says this is run, but it isn't.
+
+
+KERNEL API CHANGES
+
+Fedora 8 on Intel Core Duo
+
+Linux roma.44ansell.gdt.id.au 2.6.24.3-12.fc8 #1 SMP Tue Feb 26 14:58:29 EST 2008 i686 i686 i386 GNU/Linux
+
+ - doesn't accept mask in struct nf_conntrack_helper
+ - has altered prototype for helper, removing an indirection
+
+
 SOCKET BUFFERS
 
 See
@@ -29,6 +62,17 @@ $ make
 # in.telnetd -debug 2000
 
 $ telnet localhost 2000
+
+
+NAMING
+
+Skinny is Cisco Systems' propietary IP phone control protocol.
+The protocol has gone by a number of names:
+ - Cisco Skinny Station Protocol, Cisco Systems' currently preferred name.
+ - Selsius Connection Control Protocol (SCCP, but this is also used for
+   SS7 Signalling Connection Protocol)
+so we'll just use Skinny, which has been the protocol's informal name
+from the start.
 
 
 COPYRIGHT

@@ -37,10 +37,20 @@
 /* Before changing this convert the conntrack module to use an array/ */
 #define SKINNY_MAX_EXPECTED 8
 
-/* Documentation for Cisco firewall suggests a timeout of 1 hour, so
- * we slavishly use the same.
+/* [1] suggests that the default connection tracking time for Skinny
+ * should be 3600 seconds. In practice KeepAlive messages seem to be
+ * sent down the control TCP connection by the handset every 20
+ * seconds. Reasonable values for the connection tracking timeout
+ * would be greater than a switch's spanning tree port forwarding hold
+ * down, plus TCP retry time and would require at least three
+ * KeepAlives to be lost. So values above 100 seconds are reasonable.
+ *
+ * [1] "Firewall Support of Skinny Client Control Protocol (SCCP)",
+ *     Cisco Systems, 2005.
+ *     <http://www.cisco.com/univercd/cc/td/doc/product/software/ios123/123newft/123_1/ftskinny.htm>
  */
 #define SKINNY_TIMEOUT 3600
+#define SKINNY_TIMEOUT_REASONABLE_MIN 100
 
 /* The Skinny protocol may have multiple protocol data units with
  * one TCP packet. The stream of Skinny PDUs looks like this:

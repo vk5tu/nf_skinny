@@ -3,17 +3,6 @@
  * $Id$
  *
  *
- * NAMING
- *
- * Skinny is Cisco Systems' propietary IP phone control protocol.
- * The protocol has gone by a number of names:
- *  - Cisco Skinny Station Protocol, Cisco Systems' currently preferred name.
- *  - Selsius Connection Control Protocol (SCCP, but this is also used for
- *    SS7 Signalling Connection Protocol)
- * so we'll just use Skinny, which has been the protocol's informal name
- * from the start.
- *
- *
  * PRINCIPLES OF OPERATION
  *
  * Skinny is a TCP connection from a Call Manager to each IP Phone. Messages
@@ -189,7 +178,7 @@ parse_skinny_pdu(char *skinny_data,
  */
 
 static int
-skinny_conntrack_helper(struct sk_buff **matching_skb_p,
+skinny_conntrack_helper(struct sk_buff *matching_skb,
                         unsigned int matching_offset,
                         struct nf_conn *ct,
                         enum ip_conntrack_info conntrack_info)
@@ -216,12 +205,13 @@ skinny_conntrack_helper(struct sk_buff **matching_skb_p,
     /* Like most other conntrack modules we are too slack to
      * handle non-linear SKBs.
      */
-    if (skb_is_nonlinear(*matching_skb_p)) {
+    if (skb_is_nonlinear(matching_skb)) {
       return NF_ACCEPT;
     }
 
+    /* Replace with finer RCU lock when data structure usage fully sorted. */
     spin_lock_bh(&skinny_buffer_lock);
-    tcp_header = skb_header_pointer(*matching_skb_p,
+    tcp_header = skb_header_pointer(matching_skb,
                                     matching_offset,
                                     sizeof(tcp_buffer),
                                     &tcp_buffer);
@@ -233,20 +223,20 @@ skinny_conntrack_helper(struct sk_buff **matching_skb_p,
     /* Skinny protocol data unit is after TCP header and its options. */
     skinny_offset = matching_offset + tcp_header->doff * 4;
 
-    if (skinny_offset >= (*matching_skb_p)->len) {
+    if (skinny_offset >= matching_skb->len) {
      if (net_ratelimit()) {
         printk(KERN_ERR PRINTK_PREFIX
                "Unexpectedly short packet ignored. "
                "Expected Skinny data at offset %u, but socket buffer too "
                "short with only %u.\n",
                skinny_offset,
-               (*matching_skb_p)->len);
+               matching_skb->len);
       }
       ret = NF_ACCEPT;
       goto unlock_end;
     }
-    skinny_length = (*matching_skb_p)->len - skinny_offset;
-    skinny_header = skb_header_pointer(*matching_skb_p,
+    skinny_length = matching_skb->len - skinny_offset;
+    skinny_header = skb_header_pointer(matching_skb,
                                        skinny_offset,
                                        skinny_length,
                                        skinny_buffer);
@@ -260,7 +250,9 @@ skinny_conntrack_helper(struct sk_buff **matching_skb_p,
                            CTINFO2DIR(conntrack_info));
 
 #if 0
-    skinny_message_header = skb_header_pointer(*matching_skb_p,
+
+    /* Parse the PDU header */
+    skinny_message_header = skb_header_pointer(matching_skb,
                                                skinny_offset,
                                                sizeof(struct skinny_tcp_msg_header),
                                                skinny_tcp_msg_header_buffer);
@@ -279,9 +271,11 @@ skinny_conntrack_helper(struct sk_buff **matching_skb_p,
       goto unlock_end;
     }
 
+    /* Parse the Message Type */
+
     remaining_offset = skinny_offset + sizeof(struct skinny_tcp_msg_header);
     while (remaining_skinny_msg) {
-      msg_id = skb_header_pointer(*matching_skb_p,
+      msg_id = skb_header_pointer(matching_skb,
                                   remaining_offset,
                                   sizeof(__le16),   /* BUG IN STUCT */
                                   some sort of buffer
@@ -303,7 +297,7 @@ nf_test_init(void)
 {
     int problems;
 
-    /* Hello world, this is John Laws */
+    /* "Hello world, this is John Laws" */
     printk(KERN_INFO PRINTK_PREFIX
            "Compiled on " __DATE__ " at " __TIME__ ".\n");
 
@@ -314,11 +308,11 @@ nf_test_init(void)
              "Abandoning module installation.\n");
       return -EINVAL;
     }
-    if (skinny_timeout < 20) {
+    if (skinny_timeout < SKINNY_TIMEOUT_REASONABLE_MIN) {
       printk(KERN_INFO PRINTK_PREFIX
              "Module parameter skinny_timeout is perhaps too low at less "
-             "than 20 seconds. "
-             "The Light Brigade charges onwards regardless.\n");
+             "than %d seconds. Proceeeding regardless.\n",
+             SKINNY_TIMEOUT_REASONABLE_MIN);
     }
 
     /* Allocate resources.
@@ -328,7 +322,7 @@ nf_test_init(void)
     skinny_buffer = kmalloc(0x10000, GFP_KERNEL);
     if (!skinny_buffer) {
       /* If they even see this message then the author of printk() has
-       * done fine work. Linux doesn't yet run on 8-bit computers.
+       * done fine work.
        */
       printk(KERN_ERR PRINTK_PREFIX
              "Insufficient kernel memory for 64KB packet parsing buffer. "
@@ -346,11 +340,8 @@ nf_test_init(void)
     helper.timeout = skinny_timeout;
     /* Send all Skinny packets to this conntrack module. */
     helper.tuple.src.l3num = AF_INET;
-    helper.mask.src.l3num = 0xff;
     helper.tuple.dst.protonum = IPPROTO_TCP;
-    helper.mask.dst.protonum = 0xff;
     helper.tuple.src.u.tcp.port = htons(skinny_port);
-    helper.mask.src.u.tcp.port = __constant_htons(0xffff);
 
     /* Register this connection tracking helper. */
     problems = nf_conntrack_helper_register(&helper);
@@ -394,6 +385,6 @@ module_init(nf_test_init);
 module_exit(nf_test_exit);
 
 MODULE_AUTHOR("Glen Turner <gdt+linux@gdt.id.au>");
-MODULE_DESCRIPTION("Cisco Skinny Station Protocol (formerly Selsius Connection "
-                   "Control Protocol, SCCP) connection tracking");
+MODULE_DESCRIPTION("Cisco Skinny Station Protocol (formerly Selsius"
+                   "Connection Control Protocol, SCCP) connection tracking");
 MODULE_LICENSE("GPL");
