@@ -64,6 +64,7 @@
 #include <linux/module.h>
 #include <linux/stat.h> /* for S_* */
 #include <linux/kernel.h> /* for printk() */
+#include <asm/byteorder.h>
 
 #include <linux/in.h>
 #include <linux/ip.h>
@@ -79,6 +80,7 @@
 #include <net/netfilter/nf_conntrack_helper.h>
 #include "nf_conntrack_skinny.h"
 
+
 #include <linux/moduleparam.h>
 
 #define PRINTK_PREFIX "nf_conntrack_skinny: "
@@ -91,18 +93,6 @@ MODULE_PARM_DESC(skinny_port,
                  "Well-known TCP port for Skinny control connection. "
                  "(Default: TCP port " VALUE(SKINNY_CONTROL_TCP_PORT) ")");
 
-/* [1] suggests that the default connection tracking time for Skinny
- * should be 3600 seconds. In practice KeepAlive messages seem to be
- * sent down the control TCP connection by the handset every 20
- * seconds. Reasonable values for the connection tracking timeout
- * would be greater than a switch's spanning tree port forwarding hold
- * down, plus TCP retry time and would require at least three
- * KeepAlives to be lost. So values above 100 seconds are reasonable.
- *
- * [1] "Firewall Support of Skinny Client Control Protocol (SCCP)",
- *     Cisco Systems, 2005.
- *     <http://www.cisco.com/univercd/cc/td/doc/product/software/ios123/123newft/123_1/ftskinny.htm>
- */
 static unsigned int __read_mostly skinny_timeout = SKINNY_TIMEOUT;
 module_param(skinny_timeout, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_timeout,
@@ -126,47 +116,267 @@ EXPORT_SYMBOL_GPL(nf_nat_skinny_hook);
 char *skinny_buffer = NULL;
 static DEFINE_SPINLOCK(skinny_buffer_lock);
 
+
+/* Parse a Station Register message.
+ *
+ * Returns: !0: do not parse further PDUs in this packet.
+ */
 static int
-parse_skinny_pdu(char *skinny_data,
+parse_station_register(struct sk_buff *matching_skb,
+                       unsigned int offset,
+                       unsigned int length,
+                       enum ip_conntrack_dir direction)
+{
+    struct skinny_station_register *station_register;
+    struct skinny_station_register station_register_buffer;
+
+    station_register = skb_header_pointer(
+                           matching_skb,
+                           offset,
+                           sizeof(struct skinny_station_register),
+                           &station_register_buffer);
+    if (!station_register) {
+        return !0;
+    }
+    /* Extract IP address */
+    /* Set up conntrack */
+    return 0;
+}
+
+
+/* Parse a Station IP Port message.
+ *
+ * Returns: !0: do not parse further PDUs in this packet.
+ */
+static int
+parse_station_ip_port(struct sk_buff *matching_skb,
+                      unsigned int offset,
+                      unsigned int length,
+                      enum ip_conntrack_dir direction)
+{
+    struct skinny_station_ip_port *station_ip_port;
+    struct skinny_station_ip_port station_ip_port_buffer;
+
+    station_ip_port = skb_header_pointer(
+                           matching_skb,
+                           offset,
+                           sizeof(struct skinny_station_ip_port),
+                           &station_ip_port_buffer);
+    if (!station_ip_port) {
+        return !0;
+    }
+
+    printk(KERN_INFO PRINTK_PREFIX
+           "parse_station_ip_port\n");
+    /* Extract Port */
+    /* Set up conntrack */
+    return 0;
+}
+
+
+/* Parse a Open Recieve Channel Acknowledge message.
+ *
+ * Returns: !0: do not parse further PDUs in this packet.
+ */
+static int
+parse_open_receive_channel_ack(struct sk_buff *matching_skb,
+                               unsigned int offset,
+                               unsigned int length,
+                               enum ip_conntrack_dir direction)
+{
+    struct skinny_open_receive_channel_ack *open_receive_channel_ack;
+    struct skinny_open_receive_channel_ack open_receive_channel_ack_buffer;
+
+    open_receive_channel_ack = skb_header_pointer(
+                           matching_skb,
+                           offset,
+                           sizeof(struct skinny_open_receive_channel_ack),
+                           &open_receive_channel_ack_buffer);
+    if (!open_receive_channel_ack) {
+        return !0;
+    }
+    printk(KERN_INFO PRINTK_PREFIX
+           "open_receive_channel_ack\n");
+    /* Extract Port */
+    /* Set up conntrack */
+    return 0;
+}
+
+
+/* Parse a Open Recieve Channel Acknowledge message.
+ *
+ * Returns: !0: do not parse further PDUs in this packet.
+ */
+static int
+parse_start_media_transmission(struct sk_buff *matching_skb,
+                               unsigned int offset,
+                               unsigned int length,
+                               enum ip_conntrack_dir direction)
+{
+    struct skinny_start_media_transmission *start_media_transmission;
+    struct skinny_start_media_transmission start_media_transmission_buffer;
+
+    start_media_transmission = skb_header_pointer(
+                                   matching_skb,
+                                   offset,
+                                   sizeof(struct skinny_start_media_transmission),
+                                   &start_media_transmission_buffer);
+    if (!start_media_transmission) {
+        return !0;
+    }
+    printk(KERN_INFO PRINTK_PREFIX
+           "start_media_transmission\n");
+    /* Extract Port */
+    /* Set up conntrack */
+    return 0;
+}
+
+
+/* Parse a Skinny protocol data unit.
+ *
+ * Returns: !0: do not parse further PDUs in this packet.
+ */
+static int
+parse_skinny_pdu(struct sk_buff *matching_skb,
+                 unsigned int *skinny_offset,
                  unsigned int skinny_length,
                  enum ip_conntrack_dir direction)
 {
-  /* Dump packet for debugging */
-  {
-    char *p;
-    unsigned int i;
-    char c;
+    struct skinny_tcp_msg_header *tcp_msg_header;
+    struct skinny_tcp_msg_header tcp_msg_header_buffer;
+    struct skinny_msg_id *msg_id_header;
+    struct skinny_msg_id msg_id_buffer;
+    unsigned int offset;
+    unsigned int msg_len;
+    unsigned int msg_id;
+    int ret;
 
-    for (p = skinny_data, i = 0; i < skinny_length; p++, i++) {
-      c = *p;
-      if (c >= ' ' && c <= '~') {
-        printk(KERN_INFO PRINTK_PREFIX
-               "skinny_data[%u] = %d %02x %c\n",
-               i, (int)c, (int)c, c);
-      } else {
-        printk(KERN_INFO PRINTK_PREFIX
-               "skinny_data[%u] = %d %02x\n",
-               i, (int)c, (int)c);
-      }
+    offset = *skinny_offset;
+
+    /* Each Skinny PDU begins with a header named TcpMsgHeader. It
+     * contains a MsgLen (the number of bytes following this header)
+     * and a LinkMsgType (indicating compression, encryption and so
+     * on).
+     *
+     * Since this is reverse-engineered, we don't know if MsgLen can
+     * be validly 0 (from a conceptual point of view a zero-length
+     * Skinny PDU could be useful for keep alives). So we had better
+     * allow for that.
+     *
+     * LinkMsgType has only been reported with value 0. We punt on
+     * other values as trying to parse a compressed or encrypted
+     * packet isn't going to work.
+     */
+    tcp_msg_header = skb_header_pointer(matching_skb,
+                                        offset,
+                                        sizeof(struct skinny_tcp_msg_header),
+                                        &tcp_msg_header_buffer);
+    if (!tcp_msg_header) {
+        if (net_ratelimit()) {
+            printk(KERN_ERR PRINTK_PREFIX
+                   "Skinny TcpMsgHeader contents missing.\n");
+        }
+        return !0;
     }
-  }
+    msg_len = le32_to_cpu(tcp_msg_header->msg_len);
+    if (msg_len > skinny_length) {
+        if (net_ratelimit()) {
+            printk(KERN_ERR PRINTK_PREFIX
+                   "Skinny header length (%u) longer than packet (%u).\n",
+                   msg_len,
+                   skinny_length);
+        }
+        return !0;
+    }
+    offset += sizeof(struct skinny_tcp_msg_header);
+    if (le32_to_cpu(tcp_msg_header->link_msg_type) !=
+        SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
+        if (net_ratelimit()) {
+            printk(KERN_INFO PRINTK_PREFIX
+                   "Skinny protocol data unit not plaintext but is "
+                   "link_msg_type %u. Cannot analyse this PDU,"
+                   "continuing with next PDU.\n",
+                   tcp_msg_header->link_msg_type);
+        }
+        *skinny_offset = offset;
+        return 0;
+    }
 
-  /* Skinny PDUs start with a header.
-   * It contains:
-   *  MsgLen, 4 bytes, unsigned integer
-   *    The length of the message, not including this header.
-   *  LinkMsgType, 4 bytes, unsigned integer
-   *    Indicates encryption or compression of follwing content.
-   *    The only known value is 0 -- plain text.
-   */
-  
+    /* The msg_id identifies the purpose and structure of the
+     * message.  We only need to parse some msg_id types to be
+     * able to track a connection.
+     */
+    msg_id_header = skb_header_pointer(matching_skb,
+                                       offset,
+                                       sizeof(struct skinny_msg_id),
+                                       &msg_id_buffer);
+    
+    if (!msg_id_header) {
+        if (net_ratelimit()) {
+            printk(KERN_ERR PRINTK_PREFIX
+                   "Skinny msg_id contents missing.\n");
+        }
+        return !0;
+    }
+    msg_id = le16_to_cpu(msg_id_header->msg_id);
+    offset += sizeof(struct skinny_msg_id);
 
-    /* while not end of packet */
-    /* if msg_len enough */
-    /* if msg_type 0 */
-    /* extract msg_id */
-    /* case msg_id */
-    /* parse msg types */
+    switch (msg_id) {
+    case SKINNY_MSG_ID_STATION_REGISTER:
+        ret = parse_station_register(matching_skb,
+                                     offset,
+                                     msg_len,
+                                     direction);
+        break;
+    case SKINNY_MSG_ID_STATION_IP_PORT:
+        ret = parse_station_ip_port(matching_skb,
+                                    offset,
+                                    msg_len,
+                                    direction);
+        break;
+    case SKINNY_MSG_ID_OPEN_RECEIVE_CHANNEL_ACK:
+        ret = parse_open_receive_channel_ack(matching_skb,
+                                             offset,
+                                             msg_len,
+                                             direction);
+        break;
+    case SKINNY_MSG_ID_START_MEDIA_TRANSMISSION:
+        ret = parse_start_media_transmission(matching_skb,
+                                             offset,
+                                             msg_len,
+                                             direction);
+        break;
+    default:
+        /* Other PDUs have contents which don't need connection
+         * tracking.
+         */
+        ret = 0;
+    }
+    *skinny_offset = offset + msg_len;
+
+    return ret;
+}
+
+
+static int
+parse_skinny_packet(struct sk_buff *matching_skb,
+                    unsigned int skinny_offset,
+                    unsigned int skinny_length,
+                    enum ip_conntrack_dir direction)
+{
+    unsigned int offset;
+    int problems = 0;
+
+    /* The packet can contain one or more Skinny protocol data units.
+     * Accept the packet unless a subordinate parser says to toss it.
+     */
+    offset = skinny_offset;
+    while (offset <= skinny_length && !problems) {
+        problems = parse_skinny_pdu(matching_skb,
+                                    &offset,
+                                    skinny_length,
+                                    direction);
+    }
     return NF_ACCEPT;
 }
 
@@ -176,7 +386,6 @@ parse_skinny_pdu(char *skinny_data,
  * connection adding expected RTP flows to the connection tracking
  * system.
  */
-
 static int
 skinny_conntrack_helper(struct sk_buff *matching_skb,
                         unsigned int matching_offset,
@@ -197,7 +406,7 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
      */
     if (conntrack_info != IP_CT_ESTABLISHED &&
         conntrack_info != (IP_CT_ESTABLISHED + IP_CT_IS_REPLY)) {
-      return NF_ACCEPT;
+        return NF_ACCEPT;
     }
 
     /* Do we need to see if the TCP checksum is valid? */
@@ -206,7 +415,7 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
      * handle non-linear SKBs.
      */
     if (skb_is_nonlinear(matching_skb)) {
-      return NF_ACCEPT;
+        return NF_ACCEPT;
     }
 
     /* Replace with finer RCU lock when data structure usage fully sorted. */
@@ -216,73 +425,54 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
                                     sizeof(tcp_buffer),
                                     &tcp_buffer);
     if (!tcp_header) {
-      ret = NF_ACCEPT;
-      goto unlock_end;
+        ret = NF_ACCEPT;
+        goto unlock_end;
     }
 
-    /* Skinny protocol data unit is after TCP header and its options. */
+    /* Skinny protocol data unit is after TCP header and its options.
+     * TCP stores the length of its header in .doff in units of 4-byte
+     * words.
+     */
+    /* Is doff in network byte order? */
     skinny_offset = matching_offset + tcp_header->doff * 4;
 
     if (skinny_offset >= matching_skb->len) {
-     if (net_ratelimit()) {
-        printk(KERN_ERR PRINTK_PREFIX
-               "Unexpectedly short packet ignored. "
-               "Expected Skinny data at offset %u, but socket buffer too "
-               "short with only %u.\n",
-               skinny_offset,
-               matching_skb->len);
-      }
-      ret = NF_ACCEPT;
-      goto unlock_end;
+        if (net_ratelimit()) {
+            printk(KERN_ERR PRINTK_PREFIX
+                   "Unexpectedly short packet ignored. "
+                   "Expected Skinny data at offset %u, but socket buffer too "
+                   "short with only %u.\n",
+                   skinny_offset,
+                   matching_skb->len);
+        }
+        ret = NF_ACCEPT;
+        goto unlock_end;
     }
+
     skinny_length = matching_skb->len - skinny_offset;
     skinny_header = skb_header_pointer(matching_skb,
                                        skinny_offset,
                                        skinny_length,
                                        skinny_buffer);
     if (!skinny_header) {
-      ret = NF_ACCEPT;
-      goto unlock_end;
+        /* No data at all, a bit odd since we were just told that there
+         * was data. Hmmm.
+         */
+        if (net_ratelimit()) {
+            printk(KERN_ERR PRINTK_PREFIX
+                   "Packet contents missing.\n");
+        }
+        ret = NF_ACCEPT;
+        goto unlock_end;
     }
 
-    ret = parse_skinny_pdu(skinny_header,
-                           skinny_length,
-                           CTINFO2DIR(conntrack_info));
-
-#if 0
-
-    /* Parse the PDU header */
-    skinny_message_header = skb_header_pointer(matching_skb,
-                                               skinny_offset,
-                                               sizeof(struct skinny_tcp_msg_header),
-                                               skinny_tcp_msg_header_buffer);
-    if (!skinny_message_header) {
-      ret = NF_ACCEPT;
-      goto unlock_end;
-    }
-    if (skinny_message_header->link_msg_type !=
-        SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
-      ret = NF_ACCEPT;
-      goto unlock_end;
-    }
-    remaining_skinny_msg = skinny_message_header->msg_len;
-    if (!remaining_skinny_msg) {
-      ret = NF_ACCEPT;
-      goto unlock_end;
-    }
-
-    /* Parse the Message Type */
-
-    remaining_offset = skinny_offset + sizeof(struct skinny_tcp_msg_header);
-    while (remaining_skinny_msg) {
-      msg_id = skb_header_pointer(matching_skb,
-                                  remaining_offset,
-                                  sizeof(__le16),   /* BUG IN STUCT */
-                                  some sort of buffer
-                                  /* UP TO HERE */
-    }
-
-#endif
+    /* Do the heavy-duty Skinny parsing, setting up connection
+     * tracking if relevant protocol data units are encountered.
+     */
+    ret = parse_skinny_packet(matching_skb,
+                              skinny_offset,
+                              skinny_length,
+                              CTINFO2DIR(conntrack_info));
 
  unlock_end:
     spin_unlock_bh(&skinny_buffer_lock);

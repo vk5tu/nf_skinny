@@ -119,9 +119,15 @@ struct __attribute__((__packed__)) skinny_tcp_msg_header {
     __le32 link_msg_type;
 };
 
+struct __attribute__((__packed__)) skinny_msg_id {
+    /* Message type. Identifies the purpose and structure of the
+     * protocol data unit.
+     */
+    __le16 msg_id;
+};
+
 #define SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH 16
 struct __attribute__((__packed__)) skinny_station_register {
-    __le32 msg_id;
     char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
     __le32 station_user_id;
     __le32 station_instance;
@@ -137,7 +143,6 @@ struct __attribute__((__packed__)) skinny_station_register {
         offsetof(struct skinny_station_register, device_type)
 
 struct __attribute__((__packed__)) skinny_station_ip_port {
-    __le32  msg_id;
     /* 16 bit UDP port in a 32-bit field in this odd sequence of bytes:
      *  PORT_MSB PORT_LSB 00 00
      * The trailing bytes have always been observed to be zero.
@@ -149,7 +154,6 @@ struct __attribute__((__packed__)) skinny_station_ip_port {
         offsetof(struct skinny_station_ip_port, expected_to_be_zero)
 
 struct __attribute__((__packed__)) skinny_open_receive_channel_ack {
-    __le32 msg_id;
     __le32 open_receive_channel_status;
     __be32 ip_address;
     __be16 udp_port;
@@ -168,7 +172,6 @@ struct __attribute__((__packed__)) skinny_open_receive_channel_ack {
  * RTP traffic out the interface this packet arrives on.
  */
 struct __attribute__((__packed__)) skinny_start_media_transmission {
-    __le32 msg_id;
     __le32 conference_id;
     __le32 pass_thru_party_id;
     __be32 remote_ip_address;
