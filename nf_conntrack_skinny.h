@@ -192,6 +192,15 @@ struct __attribute__((__packed__)) skinny_start_media_transmission {
         offsetof(struct skinny_start_media_transmission_length, \
                  expected_to_be_zero)
 
+
+/* Connection tracking */
+struct nf_skinny_ct_info {
+    /* Identify the phone. */
+    unsigned int station_instance;
+    unsigned int station_user_id;
+    char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
+};
+
 #endif /* defined(__KERNEL__) */
 
 #endif /* !defined(_NF_CONNTRACK_SKINNY_H) */

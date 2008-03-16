@@ -90,20 +90,20 @@
 static unsigned int __read_mostly skinny_port = SKINNY_CONTROL_TCP_PORT;
 module_param(skinny_port, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_port,
-                 "Well-known TCP port for Skinny control connection. "
-                 "(Default: TCP port " VALUE(SKINNY_CONTROL_TCP_PORT) ")");
+                 "Well-known TCP port for Skinny control connection "
+                 "[" VALUE(SKINNY_CONTROL_TCP_PORT) "]");
 
 static unsigned int __read_mostly skinny_timeout = SKINNY_TIMEOUT;
 module_param(skinny_timeout, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_timeout,
-                 "Timeout for Skinny connection tracking. "
-                 "(Default: " VALUE(SKINNY_TIMEOUT) " seconds)");
+                 "Timeout for Skinny connection tracking, in seconds "
+                 "[" VALUE(SKINNY_TIMEOUT) "]");
 
 static unsigned int __read_mostly skinny_max_expected = SKINNY_MAX_EXPECTED;
 module_param(skinny_max_expected, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_max_expected,
-                 "Maximum Skinny control connections (one used per IP phone). "
-                 "(Default: " VALUE(SKINNY_MAX_EXPECTED) " connections)");
+                 "Maximum Skinny control connections, one used per IP phone "
+                 "[" VALUE(SKINNY_MAX_EXPECTED) "]");
 
 /* Access to this symbol is locked using RCU. */
 unsigned int
@@ -574,7 +574,7 @@ nf_test_exit(void)
 module_init(nf_test_init);
 module_exit(nf_test_exit);
 
-MODULE_AUTHOR("Glen Turner <gdt+linux@gdt.id.au>");
-MODULE_DESCRIPTION("Cisco Skinny Station Protocol (formerly Selsius"
+MODULE_AUTHOR("Glen Turner <http://www.gdt.id.au/~gdt/>");
+MODULE_DESCRIPTION("Cisco Skinny Station Protocol (formerly Selsius "
                    "Connection Control Protocol, SCCP) connection tracking");
 MODULE_LICENSE("GPL");
