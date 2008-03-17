@@ -128,6 +128,9 @@ struct __attribute__((__packed__)) skinny_msg_id {
 
 #define SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH 16
 struct __attribute__((__packed__)) skinny_station_register {
+    /* Device name is left-justified, SPace or NUL filled.
+     * There is no NUL terminator.
+     */
     char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
     __le32 station_user_id;
     __le32 station_instance;

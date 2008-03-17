@@ -93,3 +93,9 @@ General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with nf_skinny.  If not, see <http://www.gnu.org/licenses/>.
+
+
+INTELLECTUAL PROPERTY
+
+US patent pending 11/133,407, filed May 19, 2005
+US patent pending, continuation, 20060262916, published 11/23/2006
