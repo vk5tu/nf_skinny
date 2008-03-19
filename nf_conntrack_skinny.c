@@ -155,6 +155,12 @@ parse_station_register(struct sk_buff *matching_skb,
     unsigned device_type;
     unsigned max_streams;
 
+    printk(KERN_INFO PRINTK_PREFIX
+           "parse_station_register\n");
+    printk("parse_station_register() offset = %u\n", offset);
+    printk("parse_station_register() length = %u\n", length);
+
+
     station_register = skb_header_pointer(
                            matching_skb,
                            offset,
@@ -165,8 +171,6 @@ parse_station_register(struct sk_buff *matching_skb,
         return !0;
     }
 
-    printk(KERN_INFO PRINTK_PREFIX
-           "parse_station_register\n");
     memcpy(device_name,
            station_register->device_name,
            SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH);
