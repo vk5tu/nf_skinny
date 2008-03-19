@@ -87,6 +87,7 @@
 #define VALUE_PASTE(n) #n
 #define VALUE(n) VALUE_PASTE(n)
 
+
 static unsigned int __read_mostly skinny_port = SKINNY_CONTROL_TCP_PORT;
 module_param(skinny_port, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_port,
@@ -117,6 +118,24 @@ char *skinny_buffer = NULL;
 static DEFINE_SPINLOCK(skinny_buffer_lock);
 
 
+/* This error message is a hack. We don't want to blow lots of memory
+ * for strings literals that are 90% this same for this bizaare error
+ * so the string literals are made to be identical at compile time.
+ *
+ * Usage:
+ *   printk_no_skb_header_pointer(__func__);
+ */
+static void
+printk_no_skb_header_pointer(const char *func)
+{
+    if (likely(net_ratelimit())) {
+        printk(KERN_ERR PRINTK_PREFIX
+               "%s(): Packet contents missing.\n",
+               func);
+    }
+}
+
+
 /* Parse a Station Register message.
  *
  * Returns: !0: do not parse further PDUs in this packet.
@@ -136,10 +155,15 @@ parse_station_register(struct sk_buff *matching_skb,
                            sizeof(struct skinny_station_register),
                            &station_register_buffer);
     if (!station_register) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
+
+    printk(KERN_INFO PRINTK_PREFIX
+           "parse_station_register\n");
     /* Extract IP address */
     /* Set up conntrack */
+
     return 0;
 }
 
@@ -163,6 +187,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
                            sizeof(struct skinny_station_ip_port),
                            &station_ip_port_buffer);
     if (!station_ip_port) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
 
@@ -170,6 +195,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
            "parse_station_ip_port\n");
     /* Extract Port */
     /* Set up conntrack */
+
     return 0;
 }
 
@@ -193,12 +219,15 @@ parse_open_receive_channel_ack(struct sk_buff *matching_skb,
                            sizeof(struct skinny_open_receive_channel_ack),
                            &open_receive_channel_ack_buffer);
     if (!open_receive_channel_ack) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
+
     printk(KERN_INFO PRINTK_PREFIX
            "open_receive_channel_ack\n");
     /* Extract Port */
     /* Set up conntrack */
+
     return 0;
 }
 
@@ -216,24 +245,35 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
     struct skinny_start_media_transmission *start_media_transmission;
     struct skinny_start_media_transmission start_media_transmission_buffer;
 
+    printk(KERN_INFO "start_media_transmission\n");
+
     start_media_transmission = skb_header_pointer(
                                    matching_skb,
                                    offset,
                                    sizeof(struct skinny_start_media_transmission),
                                    &start_media_transmission_buffer);
     if (!start_media_transmission) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
+
     printk(KERN_INFO PRINTK_PREFIX
            "start_media_transmission\n");
     /* Extract Port */
     /* Set up conntrack */
+
     return 0;
 }
 
 
 /* Parse a Skinny protocol data unit.
- *
+ * Input:
+ *   matching_skb
+ *   skinny_offset
+ *   skinny_length
+ *   direction
+ * Output:
+ *   updated skinny_offset
  * Returns: !0: do not parse further PDUs in this packet.
  */
 static int
@@ -251,7 +291,10 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     unsigned int msg_id;
     int ret;
 
+    printk("skinny_length %u\n", skinny_length);
+
     offset = *skinny_offset;
+    printk("offset %u\n", offset);
 
     /* Each Skinny PDU begins with a header named TcpMsgHeader. It
      * contains a MsgLen (the number of bytes following this header)
@@ -271,27 +314,28 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
                                         offset,
                                         sizeof(struct skinny_tcp_msg_header),
                                         &tcp_msg_header_buffer);
-    if (!tcp_msg_header) {
-        if (net_ratelimit()) {
-            printk(KERN_ERR PRINTK_PREFIX
-                   "Skinny TcpMsgHeader contents missing.\n");
-        }
+    if (unlikely(!tcp_msg_header)) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
+    printk("tcp_msg_header->msg_len %u\n", tcp_msg_header->msg_len);
     msg_len = le32_to_cpu(tcp_msg_header->msg_len);
-    if (msg_len > skinny_length) {
-        if (net_ratelimit()) {
+    printk("msg_len %u\n", msg_len);
+    if (unlikely(msg_len > skinny_length)) {
+        if (likely(net_ratelimit())) {
             printk(KERN_ERR PRINTK_PREFIX
-                   "Skinny header length (%u) longer than packet (%u).\n",
+                   "Message length from Skinny header (%u bytes) is longer "
+                   "than data in packet (%u bytes). Perhaps not Skinny "
+                   "traffic?\n",
                    msg_len,
                    skinny_length);
         }
         return !0;
     }
     offset += sizeof(struct skinny_tcp_msg_header);
-    if (le32_to_cpu(tcp_msg_header->link_msg_type) !=
+    if (unlikely(le32_to_cpu(tcp_msg_header->link_msg_type)) !=
         SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
-        if (net_ratelimit()) {
+        if (likely(net_ratelimit())) {
             printk(KERN_INFO PRINTK_PREFIX
                    "Skinny protocol data unit not plaintext but is "
                    "link_msg_type %u. Cannot analyse this PDU,"
@@ -311,16 +355,14 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
                                        sizeof(struct skinny_msg_id),
                                        &msg_id_buffer);
     
-    if (!msg_id_header) {
-        if (net_ratelimit()) {
-            printk(KERN_ERR PRINTK_PREFIX
-                   "Skinny msg_id contents missing.\n");
-        }
+    if (unlikely(!msg_id_header)) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
     msg_id = le16_to_cpu(msg_id_header->msg_id);
     offset += sizeof(struct skinny_msg_id);
 
+    printk("msg_id %u\n", msg_id);
     switch (msg_id) {
     case SKINNY_MSG_ID_STATION_REGISTER:
         ret = parse_station_register(matching_skb,
@@ -358,6 +400,14 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
 }
 
 
+/* Parse a packet containing Skinny PDUs.
+ * Input:
+ *   matching_skb
+ *   skinny_offset
+ *   skinny_length
+ *   direction
+ * Returns: accept or reject packet and all its PDUs.
+ */
 static int
 parse_skinny_packet(struct sk_buff *matching_skb,
                     unsigned int skinny_offset,
@@ -399,22 +449,22 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
                  skinny_length;
     char *skinny_header;
 
-    printk(KERN_INFO "helper\n");
-
     /* Don't track connections until the TCP connection is fully
      * established. TCP handshakes carry no application data.
      */
-    if (conntrack_info != IP_CT_ESTABLISHED &&
-        conntrack_info != (IP_CT_ESTABLISHED + IP_CT_IS_REPLY)) {
+    if (unlikely(conntrack_info != IP_CT_ESTABLISHED &&
+                 conntrack_info != (IP_CT_ESTABLISHED + IP_CT_IS_REPLY))) {
         return NF_ACCEPT;
     }
 
-    /* Do we need to see if the TCP checksum is valid? */
+    /* Do we need to see if the TCP checksum is valid? If so, it goes
+     * here.
+     */
 
     /* Like most other conntrack modules we are too slack to
      * handle non-linear SKBs.
      */
-    if (skb_is_nonlinear(matching_skb)) {
+    if (unlikely(skb_is_nonlinear(matching_skb))) {
         return NF_ACCEPT;
     }
 
@@ -424,7 +474,8 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
                                     matching_offset,
                                     sizeof(tcp_buffer),
                                     &tcp_buffer);
-    if (!tcp_header) {
+    if (unlikely(!tcp_header)) {
+        printk_no_skb_header_pointer(__func__);
         ret = NF_ACCEPT;
         goto unlock_end;
     }
@@ -436,12 +487,12 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
     /* Is doff in network byte order? */
     skinny_offset = matching_offset + tcp_header->doff * 4;
 
-    if (skinny_offset >= matching_skb->len) {
-        if (net_ratelimit()) {
+    if (unlikely(skinny_offset >= matching_skb->len)) {
+        if (likely(net_ratelimit())) {
             printk(KERN_ERR PRINTK_PREFIX
-                   "Unexpectedly short packet ignored. "
-                   "Expected Skinny data at offset %u, but socket buffer too "
-                   "short with only %u.\n",
+                   "Unexpectedly short packet, perhaps not Skinny traffic?"
+                   "Expected Skinny data to begin at byte %u, but packet"
+                   "too short with only %u bytes.\n",
                    skinny_offset,
                    matching_skb->len);
         }
@@ -454,14 +505,11 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
                                        skinny_offset,
                                        skinny_length,
                                        skinny_buffer);
-    if (!skinny_header) {
+    if (unlikely(!skinny_header)) {
         /* No data at all, a bit odd since we were just told that there
          * was data. Hmmm.
          */
-        if (net_ratelimit()) {
-            printk(KERN_ERR PRINTK_PREFIX
-                   "Packet contents missing.\n");
-        }
+        printk_no_skb_header_pointer(__func__);
         ret = NF_ACCEPT;
         goto unlock_end;
     }
@@ -487,9 +535,16 @@ nf_test_init(void)
 {
     int problems;
 
-    /* "Hello world, this is John Laws" */
+#if 1
+    /* "Hello world, this is John Laws".
+     * During development it's useful to know if the module binary in
+     * the kernel matches the module source in the editor. You'd be
+     * surprised how many head-scratching bugs are because they don't
+     * match.
+     */
     printk(KERN_INFO PRINTK_PREFIX
-           "Compiled on " __DATE__ " at " __TIME__ ".\n");
+           "Version $Id$ compiled on " __DATE__ " at " __TIME__ ".\n");
+#endif
 
     /* Validate parameters. */
     if (skinny_max_expected < 1) {
