@@ -148,6 +148,12 @@ parse_station_register(struct sk_buff *matching_skb,
 {
     struct skinny_station_register *station_register;
     struct skinny_station_register station_register_buffer;
+    char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH+1];
+    unsigned station_user_id;
+    unsigned station_instance;
+    unsigned ip_address;
+    unsigned device_type;
+    unsigned max_streams;
 
     station_register = skb_header_pointer(
                            matching_skb,
@@ -161,6 +167,23 @@ parse_station_register(struct sk_buff *matching_skb,
 
     printk(KERN_INFO PRINTK_PREFIX
            "parse_station_register\n");
+    memcpy(device_name,
+           station_register->device_name,
+           SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH);
+    device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH] = '\0';
+    printk("station register: device name = %s\n", device_name);
+    station_user_id = le32_to_cpu(station_register->station_user_id);
+    printk("station register: station user id = %u\n", station_user_id);
+    station_instance = le32_to_cpu(station_register->station_instance);
+    printk("station register: station instance = %u\n", station_instance);
+    ip_address = ntohl(station_register->ip_address);
+    printk("station register: ip address = %04x\n", ip_address);
+    device_type = le32_to_cpu(station_register->device_type);
+    printk("station register: device type = %u\n", device_type);
+    max_streams = le32_to_cpu(station_register->max_streams);
+    printk("station register: max_streams = %u\n", max_streams);
+
+
     /* Extract IP address */
     /* Set up conntrack */
 
@@ -291,6 +314,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     unsigned int msg_id;
     int ret;
 
+    printk("parse_skinny_pdu()\n");
     printk("skinny_length %u\n", skinny_length);
 
     offset = *skinny_offset;
@@ -318,10 +342,9 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         printk_no_skb_header_pointer(__func__);
         return !0;
     }
-    printk("tcp_msg_header->msg_len %u\n", tcp_msg_header->msg_len);
     msg_len = le32_to_cpu(tcp_msg_header->msg_len);
     printk("msg_len %u\n", msg_len);
-    if (unlikely(msg_len > skinny_length)) {
+    if (unlikely(msg_len > skinny_length)) {        /* This isn't right */
         if (likely(net_ratelimit())) {
             printk(KERN_ERR PRINTK_PREFIX
                    "Message length from Skinny header (%u bytes) is longer "
@@ -334,7 +357,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     }
     offset += sizeof(struct skinny_tcp_msg_header);
     if (unlikely(le32_to_cpu(tcp_msg_header->link_msg_type)) !=
-        SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
+                 SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
         if (likely(net_ratelimit())) {
             printk(KERN_INFO PRINTK_PREFIX
                    "Skinny protocol data unit not plaintext but is "
@@ -417,6 +440,8 @@ parse_skinny_packet(struct sk_buff *matching_skb,
     unsigned int offset;
     int problems = 0;
 
+    printk("parse_skinny_packet()\n");
+
     /* The packet can contain one or more Skinny protocol data units.
      * Accept the packet unless a subordinate parser says to toss it.
      */
@@ -448,6 +473,8 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
     unsigned int skinny_offset,
                  skinny_length;
     char *skinny_header;
+
+    printk("skinny_conntrack_helper()\n");
 
     /* Don't track connections until the TCP connection is fully
      * established. TCP handshakes carry no application data.
@@ -487,11 +514,18 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
     /* Is doff in network byte order? */
     skinny_offset = matching_offset + tcp_header->doff * 4;
 
-    if (unlikely(skinny_offset >= matching_skb->len)) {
+    /* No data to parse? */
+    if (unlikely(skinny_offset == matching_skb->len)) {
+        printk("Empty packet\n");
+        ret = NF_ACCEPT;
+        goto unlock_end;
+    }
+
+    if (unlikely(skinny_offset > matching_skb->len)) {
         if (likely(net_ratelimit())) {
             printk(KERN_ERR PRINTK_PREFIX
-                   "Unexpectedly short packet, perhaps not Skinny traffic?"
-                   "Expected Skinny data to begin at byte %u, but packet"
+                   "Unexpectedly short packet, perhaps not Skinny traffic? "
+                   "Expected Skinny data to begin at byte %u, but packet "
                    "too short with only %u bytes.\n",
                    skinny_offset,
                    matching_skb->len);
