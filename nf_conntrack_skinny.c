@@ -143,7 +143,7 @@ printk_no_skb_header_pointer(const char *func)
 static int
 parse_station_register(struct sk_buff *matching_skb,
                        unsigned int offset,
-                       unsigned int length,
+                       unsigned int end_offset,
                        enum ip_conntrack_dir direction)
 {
     struct skinny_station_register *station_register;
@@ -158,14 +158,23 @@ parse_station_register(struct sk_buff *matching_skb,
     printk(KERN_INFO PRINTK_PREFIX
            "parse_station_register\n");
     printk("parse_station_register() offset = %u\n", offset);
-    printk("parse_station_register() length = %u\n", length);
+    printk("parse_station_register() end_offset = %u\n", end_offset);
 
-
-    station_register = skb_header_pointer(
-                           matching_skb,
-                           offset,
-                           sizeof(struct skinny_station_register),
-                           &station_register_buffer);
+    if (offset + sizeof(struct skinny_station_register) > end_offset) {
+        if (net_ratelimit()) {
+            printk(KERN_INFO PRINTK_PREFIX
+                   "Station Register message is too short "
+                   "(it is %u-%u bytes, but should be at least %u).\n",
+                   end_offset,
+                   offset,
+                   sizeof(struct skinny_station_register));
+        }
+        return 0;
+    }
+    station_register = skb_header_pointer(matching_skb,
+                                          offset,
+                                          sizeof(struct skinny_station_register),
+                                          &station_register_buffer);
     if (!station_register) {
         printk_no_skb_header_pointer(__func__);
         return !0;
@@ -314,15 +323,17 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     struct skinny_msg_id *msg_id_header;
     struct skinny_msg_id msg_id_buffer;
     unsigned int offset;
+    unsigned int end_offset;
     unsigned int msg_len;
     unsigned int msg_id;
-    int ret;
+    int problems = 0;
 
     printk("parse_skinny_pdu()\n");
-    printk("skinny_length %u\n", skinny_length);
 
     offset = *skinny_offset;
+    end_offset = skinny_length;
     printk("offset %u\n", offset);
+    printk("end_offset %u\n", end_offset);
 
     /* Each Skinny PDU begins with a header named TcpMsgHeader. It
      * contains a MsgLen (the number of bytes following this header)
@@ -338,6 +349,16 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
      * other values as trying to parse a compressed or encrypted
      * packet isn't going to work.
      */
+    if (offset + sizeof(struct skinny_tcp_msg_header) > end_offset) {
+        printk(KERN_INFO PRINTK_PREFIX
+               "Too short for a Skinny packet "
+               "(it is %u-%u, but should be at least %u). "
+               "Perhaps not Skinny traffic?\n",
+               end_offset,
+               offset,
+               sizeof(struct skinny_tcp_msg_header));
+        return !0;
+    }
     tcp_msg_header = skb_header_pointer(matching_skb,
                                         offset,
                                         sizeof(struct skinny_tcp_msg_header),
@@ -346,30 +367,45 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         printk_no_skb_header_pointer(__func__);
         return !0;
     }
+    offset += sizeof(struct skinny_tcp_msg_header);
+    printk("offset %u\n", offset);
+
     msg_len = le32_to_cpu(tcp_msg_header->msg_len);
     printk("msg_len %u\n", msg_len);
-    if (unlikely(msg_len > skinny_length)) {        /* This isn't right */
+    /* Validate reasonableness of msg_len. */
+    if (offset + msg_len > end_offset) {
         if (likely(net_ratelimit())) {
             printk(KERN_ERR PRINTK_PREFIX
                    "Message length from Skinny header (%u bytes) is longer "
-                   "than data in packet (%u bytes). Perhaps not Skinny "
+                   "than data in packet (%u-%u bytes). Perhaps not Skinny "
                    "traffic?\n",
                    msg_len,
-                   skinny_length);
+                   end_offset,
+                   offset);
         }
+        /* If the message length is outrageous we don't know where
+         * this message ends and thus can't parse any following
+         * messages in the remainder of this packet.
+         */
         return !0;
     }
-    offset += sizeof(struct skinny_tcp_msg_header);
+    /* End of PDU is now set by msg_len rather than packet length */
+    end_offset = offset + msg_len;
+    printk("end_offset %u\n", end_offset);
+
     if (unlikely(le32_to_cpu(tcp_msg_header->link_msg_type)) !=
                  SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
         if (likely(net_ratelimit())) {
             printk(KERN_INFO PRINTK_PREFIX
-                   "Skinny protocol data unit not plaintext but is "
-                   "link_msg_type %u. Cannot analyse this PDU,"
-                   "continuing with next PDU.\n",
-                   tcp_msg_header->link_msg_type);
+                   "Cannot analyse this message. It is not plaintext but has "
+                   "Link Message Type %u. Perhaps not Skinny traffic? "
+                   "Perhaps Skinny is using compression or encryption?\n",
+                   le32_to_cpu(tcp_msg_header->link_msg_type));
         }
-        *skinny_offset = offset;
+        /* Try to parse the next message in the packet. Perhaps not
+         * all messages are encrypted or compressed.
+         */
+        *skinny_offset = end_offset;
         return 0;
     }
 
@@ -377,6 +413,22 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
      * message.  We only need to parse some msg_id types to be
      * able to track a connection.
      */
+    if (offset + sizeof(struct skinny_msg_id) > end_offset) {
+        if (likely(net_ratelimit())) {
+            printk(KERN_INFO PRINTK_PREFIX
+                   "Message is too short to contain a MsgID "
+                   "(it is %u-%u, but should be at least %u).\n",
+                   end_offset,
+                   offset,
+                   sizeof(struct skinny_msg_id));
+        }
+        /* Try to parse the rest of the packet. The protocol design
+         * seems to allow for message headers followed by no actual
+         * message.
+         */
+        *skinny_offset = end_offset;
+        return 0;
+    }
     msg_id_header = skb_header_pointer(matching_skb,
                                        offset,
                                        sizeof(struct skinny_msg_id),
@@ -387,43 +439,39 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         return !0;
     }
     msg_id = le16_to_cpu(msg_id_header->msg_id);
-    offset += sizeof(struct skinny_msg_id);
-
     printk("msg_id %u\n", msg_id);
+    offset += sizeof(struct skinny_msg_id);
+    printk("offset %u\n", offset);
+
     switch (msg_id) {
     case SKINNY_MSG_ID_STATION_REGISTER:
-        ret = parse_station_register(matching_skb,
-                                     offset,
-                                     msg_len,
-                                     direction);
+        problems = parse_station_register(matching_skb,
+                                          offset,
+                                          end_offset,
+                                          direction);
         break;
     case SKINNY_MSG_ID_STATION_IP_PORT:
-        ret = parse_station_ip_port(matching_skb,
-                                    offset,
-                                    msg_len,
-                                    direction);
+        problems = parse_station_ip_port(matching_skb,
+                                         offset,
+                                         end_offset,
+                                         direction);
         break;
     case SKINNY_MSG_ID_OPEN_RECEIVE_CHANNEL_ACK:
-        ret = parse_open_receive_channel_ack(matching_skb,
-                                             offset,
-                                             msg_len,
-                                             direction);
+        problems = parse_open_receive_channel_ack(matching_skb,
+                                                  offset,
+                                                  end_offset,
+                                                  direction);
         break;
     case SKINNY_MSG_ID_START_MEDIA_TRANSMISSION:
-        ret = parse_start_media_transmission(matching_skb,
-                                             offset,
-                                             msg_len,
-                                             direction);
+        problems = parse_start_media_transmission(matching_skb,
+                                                  offset,
+                                                  end_offset,
+                                                  direction);
         break;
-    default:
-        /* Other PDUs have contents which don't need connection
-         * tracking.
-         */
-        ret = 0;
     }
-    *skinny_offset = offset + msg_len;
 
-    return ret;
+    *skinny_offset = end_offset;
+    return problems;
 }
 
 
@@ -441,7 +489,7 @@ parse_skinny_packet(struct sk_buff *matching_skb,
                     unsigned int skinny_length,
                     enum ip_conntrack_dir direction)
 {
-    unsigned int offset;
+    unsigned int pdu_offset;
     int problems = 0;
 
     printk("parse_skinny_packet()\n");
@@ -449,10 +497,10 @@ parse_skinny_packet(struct sk_buff *matching_skb,
     /* The packet can contain one or more Skinny protocol data units.
      * Accept the packet unless a subordinate parser says to toss it.
      */
-    offset = skinny_offset;
-    while (offset <= skinny_length && !problems) {
+    pdu_offset = skinny_offset;
+    while (pdu_offset <= skinny_length && !problems) {
         problems = parse_skinny_pdu(matching_skb,
-                                    &offset,
+                                    &pdu_offset,
                                     skinny_length,
                                     direction);
     }
