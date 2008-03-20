@@ -65,6 +65,7 @@
 #include <linux/stat.h> /* for S_* */
 #include <linux/kernel.h> /* for printk() */
 #include <asm/byteorder.h>
+#include <linux/ctype.h>
 
 #include <linux/in.h>
 #include <linux/ip.h>
@@ -136,6 +137,36 @@ printk_no_skb_header_pointer(const char *func)
 }
 
 
+/* Take string "str" of allocated size "length", possibly not
+ * 0-terminated, possibly filled to the right with trailing
+ * spaces. Turn this into a printable 0-terminated string with no
+ * trailing spaces. This may truncate the last character, regardless
+ * if it is a space or not.
+ */
+static void 
+str_tidy(char *str, size_t length)
+{
+    char *p;
+
+    /* Ensure 0-termination. */
+    str[length] = '\0';
+    /* Zap non-printable characters */
+    for (p = str; *p != '\0'; p++) {
+        if (!isprint(*p)) {
+            *p = ' ';
+        }
+    }
+    /* Remove trailing spaces. */
+    while (p != str) {
+        if (isspace(*p)) {
+            *p = '\0';
+        } else {
+            break;
+        }
+        p--;
+    }
+}
+
 /* Parse a Station Register message.
  *
  * Returns: !0: do not parse further PDUs in this packet.
@@ -148,15 +179,14 @@ parse_station_register(struct sk_buff *matching_skb,
 {
     struct skinny_station_register *station_register;
     struct skinny_station_register station_register_buffer;
-    char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH+1];
+    char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
     unsigned station_user_id;
     unsigned station_instance;
     unsigned ip_address;
     unsigned device_type;
     unsigned max_streams;
 
-    printk(KERN_INFO PRINTK_PREFIX
-           "parse_station_register\n");
+    printk("parse_station_register\n");
     printk("parse_station_register() offset = %u\n", offset);
     printk("parse_station_register() end_offset = %u\n", end_offset);
 
@@ -183,7 +213,7 @@ parse_station_register(struct sk_buff *matching_skb,
     memcpy(device_name,
            station_register->device_name,
            SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH);
-    device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH] = '\0';
+    str_tidy(device_name, SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH);
     printk("station register: device name = %s\n", device_name);
     station_user_id = le32_to_cpu(station_register->station_user_id);
     printk("station register: station user id = %u\n", station_user_id);
@@ -206,16 +236,24 @@ parse_station_register(struct sk_buff *matching_skb,
 
 /* Parse a Station IP Port message.
  *
+ * Might need to pass IP address to this to set up connection tracking.
+ *
  * Returns: !0: do not parse further PDUs in this packet.
  */
 static int
 parse_station_ip_port(struct sk_buff *matching_skb,
                       unsigned int offset,
-                      unsigned int length,
+                      unsigned int end_offset,
                       enum ip_conntrack_dir direction)
 {
     struct skinny_station_ip_port *station_ip_port;
     struct skinny_station_ip_port station_ip_port_buffer;
+    unsigned ip_address;
+    unsigned udp_port;
+
+    printk("parse_station_ip_port\n");
+    printk("parse_station_ip_port() offset = %u\n", offset);
+    printk("parse_station_ip_port() end_offset = %u\n", end_offset);
 
     station_ip_port = skb_header_pointer(
                            matching_skb,
@@ -227,8 +265,9 @@ parse_station_ip_port(struct sk_buff *matching_skb,
         return !0;
     }
 
-    printk(KERN_INFO PRINTK_PREFIX
-           "parse_station_ip_port\n");
+    udp_port = ntohs(station_ip_port->udp_port);
+    printk("station register: udp port = %u\n", udp_port);
+
     /* Extract Port */
     /* Set up conntrack */
 
@@ -268,7 +307,7 @@ parse_open_receive_channel_ack(struct sk_buff *matching_skb,
 }
 
 
-/* Parse a Open Recieve Channel Acknowledge message.
+/* Parse a Start Media Transmission message.
  *
  * Returns: !0: do not parse further PDUs in this packet.
  */
@@ -328,12 +367,8 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     unsigned int msg_id;
     int problems = 0;
 
-    printk("parse_skinny_pdu()\n");
-
     offset = *skinny_offset;
     end_offset = skinny_length;
-    printk("offset %u\n", offset);
-    printk("end_offset %u\n", end_offset);
 
     /* Each Skinny PDU begins with a header named TcpMsgHeader. It
      * contains a MsgLen (the number of bytes following this header)
@@ -368,10 +403,8 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         return !0;
     }
     offset += sizeof(struct skinny_tcp_msg_header);
-    printk("offset %u\n", offset);
 
     msg_len = le32_to_cpu(tcp_msg_header->msg_len);
-    printk("msg_len %u\n", msg_len);
     /* Validate reasonableness of msg_len. */
     if (offset + msg_len > end_offset) {
         if (likely(net_ratelimit())) {
@@ -391,7 +424,6 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     }
     /* End of PDU is now set by msg_len rather than packet length */
     end_offset = offset + msg_len;
-    printk("end_offset %u\n", end_offset);
 
     if (unlikely(le32_to_cpu(tcp_msg_header->link_msg_type)) !=
                  SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
@@ -439,9 +471,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         return !0;
     }
     msg_id = le16_to_cpu(msg_id_header->msg_id);
-    printk("msg_id %u\n", msg_id);
     offset += sizeof(struct skinny_msg_id);
-    printk("offset %u\n", offset);
 
     switch (msg_id) {
     case SKINNY_MSG_ID_STATION_REGISTER:
@@ -492,8 +522,6 @@ parse_skinny_packet(struct sk_buff *matching_skb,
     unsigned int pdu_offset;
     int problems = 0;
 
-    printk("parse_skinny_packet()\n");
-
     /* The packet can contain one or more Skinny protocol data units.
      * Accept the packet unless a subordinate parser says to toss it.
      */
@@ -523,8 +551,6 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
                   *tcp_header;
     int ret = NF_ACCEPT;
     unsigned int skinny_offset;
-
-    printk("skinny_conntrack_helper()\n");
 
     /* Don't track connections until the TCP connection is fully
      * established. TCP handshakes carry no application data.
@@ -566,7 +592,6 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
 
     /* No data to parse? */
     if (unlikely(skinny_offset == matching_skb->len)) {
-        printk("Empty packet\n");
         ret = NF_ACCEPT;
         goto unlock_end;
     }
