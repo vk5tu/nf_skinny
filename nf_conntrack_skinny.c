@@ -522,9 +522,7 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
     struct tcphdr tcp_buffer,
                   *tcp_header;
     int ret = NF_ACCEPT;
-    unsigned int skinny_offset,
-                 skinny_length;
-    char *skinny_header;
+    unsigned int skinny_offset;
 
     printk("skinny_conntrack_helper()\n");
 
@@ -586,26 +584,12 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
         goto unlock_end;
     }
 
-    skinny_length = matching_skb->len - skinny_offset;
-    skinny_header = skb_header_pointer(matching_skb,
-                                       skinny_offset,
-                                       skinny_length,
-                                       skinny_buffer);
-    if (unlikely(!skinny_header)) {
-        /* No data at all, a bit odd since we were just told that there
-         * was data. Hmmm.
-         */
-        printk_no_skb_header_pointer(__func__);
-        ret = NF_ACCEPT;
-        goto unlock_end;
-    }
-
     /* Do the heavy-duty Skinny parsing, setting up connection
      * tracking if relevant protocol data units are encountered.
      */
     ret = parse_skinny_packet(matching_skb,
                               skinny_offset,
-                              skinny_length,
+                              matching_skb->len,
                               CTINFO2DIR(conntrack_info));
 
  unlock_end:
