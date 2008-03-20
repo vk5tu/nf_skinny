@@ -180,11 +180,11 @@ parse_station_register(struct sk_buff *matching_skb,
     struct skinny_station_register *station_register;
     struct skinny_station_register station_register_buffer;
     char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
-    unsigned station_user_id;
-    unsigned station_instance;
-    unsigned ip_address;
-    unsigned device_type;
-    unsigned max_streams;
+    u_int32_t station_user_id;
+    u_int32_t station_instance;
+    u_int32_t ip_address;
+    u_int32_t device_type;
+    u_int32_t max_streams;
 
     printk("parse_station_register\n");
     printk("parse_station_register() offset = %u\n", offset);
@@ -220,7 +220,8 @@ parse_station_register(struct sk_buff *matching_skb,
     station_instance = le32_to_cpu(station_register->station_instance);
     printk("station register: station instance = %u\n", station_instance);
     ip_address = ntohl(station_register->ip_address);
-    printk("station register: ip address = %04x\n", ip_address);
+    printk("station register: ip address = " NIPQUAD_FMT "\n",
+           HIPQUAD(ip_address));
     device_type = le32_to_cpu(station_register->device_type);
     printk("station register: device type = %u\n", device_type);
     max_streams = le32_to_cpu(station_register->max_streams);
@@ -248,8 +249,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
 {
     struct skinny_station_ip_port *station_ip_port;
     struct skinny_station_ip_port station_ip_port_buffer;
-    unsigned ip_address;
-    unsigned udp_port;
+    u_int16_t udp_port;
 
     printk("parse_station_ip_port\n");
     printk("parse_station_ip_port() offset = %u\n", offset);
@@ -260,16 +260,19 @@ parse_station_ip_port(struct sk_buff *matching_skb,
                            offset,
                            sizeof(struct skinny_station_ip_port),
                            &station_ip_port_buffer);
-    if (!station_ip_port) {
-        printk_no_skb_header_pointer(__func__);
+    WARN_ON(!station_ip_port);
+    if (unlikely(!station_ip_port)) {
         return !0;
     }
 
-    udp_port = ntohs(station_ip_port->udp_port);
-    printk("station register: udp port = %u\n", udp_port);
-
     /* Extract Port */
+    udp_port = ntohs(station_ip_port->udp_port);
+    printk("station register: udp port = %u\n", (unsigned)udp_port);
+
     /* Set up conntrack */
+#if 0
+ip_conntrack_expect_related
+#endif    
 
     return 0;
 }
