@@ -84,28 +84,25 @@
 
 #include <linux/moduleparam.h>
 
-#define PRINTK_PREFIX "nf_conntrack_skinny: "
-#define VALUE_PASTE(n) #n
-#define VALUE(n) VALUE_PASTE(n)
-
+#define PFX "nf_conntrack_skinny: "
 
 static unsigned int __read_mostly skinny_port = SKINNY_CONTROL_TCP_PORT;
 module_param(skinny_port, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_port,
-                 "Well-known TCP port for Skinny control connection "
-                 "[" VALUE(SKINNY_CONTROL_TCP_PORT) "]");
+                 "Well-known TCP port for Skinny control connection, "
+                 "default " __MODULE_STRING(SKINNY_CONTROL_TCP_PORT));
 
 static unsigned int __read_mostly skinny_timeout = SKINNY_TIMEOUT;
 module_param(skinny_timeout, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_timeout,
-                 "Timeout for Skinny connection tracking, in seconds "
-                 "[" VALUE(SKINNY_TIMEOUT) "]");
+                 "Timeout for Skinny connection tracking, in seconds, "
+                 "default "__MODULE_STRING(SKINNY_TIMEOUT));
 
 static unsigned int __read_mostly skinny_max_expected = SKINNY_MAX_EXPECTED;
 module_param(skinny_max_expected, uint, S_IRUGO);
 MODULE_PARM_DESC(skinny_max_expected,
-                 "Maximum Skinny control connections, one used per IP phone "
-                 "[" VALUE(SKINNY_MAX_EXPECTED) "]");
+                 "Maximum Skinny control connections, one used per IP phone, "
+                 "default " __MODULE_STRING(SKINNY_MAX_EXPECTED));
 
 /* Access to this symbol is locked using RCU. */
 unsigned int
@@ -130,7 +127,7 @@ static void
 printk_no_skb_header_pointer(const char *func)
 {
     if (likely(net_ratelimit())) {
-        printk(KERN_ERR PRINTK_PREFIX
+        printk(KERN_ERR PFX
                "%s(): Packet contents missing.\n",
                func);
     }
@@ -185,14 +182,14 @@ parse_station_register(struct sk_buff *matching_skb,
     u_int32_t ip_address;
     u_int32_t device_type;
     u_int32_t max_streams;
-
+    
     printk("parse_station_register\n");
     printk("parse_station_register() offset = %u\n", offset);
     printk("parse_station_register() end_offset = %u\n", end_offset);
 
     if (offset + sizeof(struct skinny_station_register) > end_offset) {
         if (net_ratelimit()) {
-            printk(KERN_INFO PRINTK_PREFIX
+            printk(KERN_INFO PFX
                    "Station Register message is too short "
                    "(it is %u-%u bytes, but should be at least %u).\n",
                    end_offset,
@@ -237,6 +234,9 @@ parse_station_register(struct sk_buff *matching_skb,
 
 /* Parse a Station IP Port message.
  *
+ * This message informs the Call Manager that the IP Phone has
+ * selected UDP port "udp_port" for incoming call-progress sounds.
+ *
  * Might need to pass IP address to this to set up connection tracking.
  *
  * Returns: !0: do not parse further PDUs in this packet.
@@ -250,6 +250,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     struct skinny_station_ip_port *station_ip_port;
     struct skinny_station_ip_port station_ip_port_buffer;
     u_int16_t udp_port;
+    struct nf_conntrack_expect expect;
 
     printk("parse_station_ip_port\n");
     printk("parse_station_ip_port() offset = %u\n", offset);
@@ -260,8 +261,8 @@ parse_station_ip_port(struct sk_buff *matching_skb,
                            offset,
                            sizeof(struct skinny_station_ip_port),
                            &station_ip_port_buffer);
-    WARN_ON(!station_ip_port);
     if (unlikely(!station_ip_port)) {
+        printk_no_skb_header_pointer(__func__);
         return !0;
     }
 
@@ -271,7 +272,27 @@ parse_station_ip_port(struct sk_buff *matching_skb,
 
     /* Set up conntrack */
 #if 0
-ip_conntrack_expect_related
+    memset(&expect, 0, sizeof(struct nf_conntrack_expect));
+    LOCK_BH(&expect_lock);
+    expect.seq
+    expect.tuple.src.ip = htonl(ct->tuplehash[!dir].tuple.src.ip);
+    expect.mask.src.ip = __constant_htonl(0xffffffff);
+    expect.tuple.dst.ip = htonl(ct->tuplehash[dir].tuple.src.ip);
+    expect.mask.dst.ip  = __constant_htonl(0xffffffff);
+    /* Do we need the other UDP port here? */
+    expect.tuple.dst.u.udp.port = htons(udp_port);
+    expect.mask.dst.u.udp.port  = __constant_htons(0xffff);
+    expect.tuple.dst.protonum = IPPROTO_UDP;
+    expect.mask.dst.protonum  = 0xffff;
+    expect.expectfn = NULL;
+    expect.master = ct;
+
+    problems = ip_conntrack_expect_related(ct, &expect);
+    UNLOCK_BH(expect_lock);
+    if (problems) {
+        printk(KERN_INFO PFX "Request for connection tracking failed.\n");
+        return 0;
+    }
 #endif    
 
     return 0;
@@ -301,7 +322,7 @@ parse_open_receive_channel_ack(struct sk_buff *matching_skb,
         return !0;
     }
 
-    printk(KERN_INFO PRINTK_PREFIX
+    printk(KERN_INFO PFX
            "open_receive_channel_ack\n");
     /* Extract Port */
     /* Set up conntrack */
@@ -335,7 +356,7 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
         return !0;
     }
 
-    printk(KERN_INFO PRINTK_PREFIX
+    printk(KERN_INFO PFX
            "start_media_transmission\n");
     /* Extract Port */
     /* Set up conntrack */
@@ -388,7 +409,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
      * packet isn't going to work.
      */
     if (offset + sizeof(struct skinny_tcp_msg_header) > end_offset) {
-        printk(KERN_INFO PRINTK_PREFIX
+        printk(KERN_INFO PFX
                "Too short for a Skinny packet "
                "(it is %u-%u, but should be at least %u). "
                "Perhaps not Skinny traffic?\n",
@@ -411,7 +432,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     /* Validate reasonableness of msg_len. */
     if (offset + msg_len > end_offset) {
         if (likely(net_ratelimit())) {
-            printk(KERN_ERR PRINTK_PREFIX
+            printk(KERN_ERR PFX
                    "Message length from Skinny header (%u bytes) is longer "
                    "than data in packet (%u-%u bytes). Perhaps not Skinny "
                    "traffic?\n",
@@ -431,7 +452,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     if (unlikely(le32_to_cpu(tcp_msg_header->link_msg_type)) !=
                  SKINNY_LINK_MSG_TYPE_PLAINTEXT) {
         if (likely(net_ratelimit())) {
-            printk(KERN_INFO PRINTK_PREFIX
+            printk(KERN_INFO PFX
                    "Cannot analyse this message. It is not plaintext but has "
                    "Link Message Type %u. Perhaps not Skinny traffic? "
                    "Perhaps Skinny is using compression or encryption?\n",
@@ -450,7 +471,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
      */
     if (offset + sizeof(struct skinny_msg_id) > end_offset) {
         if (likely(net_ratelimit())) {
-            printk(KERN_INFO PRINTK_PREFIX
+            printk(KERN_INFO PFX
                    "Message is too short to contain a MsgID "
                    "(it is %u-%u, but should be at least %u).\n",
                    end_offset,
@@ -601,7 +622,7 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
 
     if (unlikely(skinny_offset > matching_skb->len)) {
         if (likely(net_ratelimit())) {
-            printk(KERN_ERR PRINTK_PREFIX
+            printk(KERN_ERR PFX
                    "Unexpectedly short packet, perhaps not Skinny traffic? "
                    "Expected Skinny data to begin at byte %u, but packet "
                    "too short with only %u bytes.\n",
@@ -640,19 +661,19 @@ nf_test_init(void)
      * surprised how many head-scratching bugs are because they don't
      * match.
      */
-    printk(KERN_INFO PRINTK_PREFIX
+    printk(KERN_INFO PFX
            "Version $Id$ compiled on " __DATE__ " at " __TIME__ ".\n");
 #endif
 
     /* Validate parameters. */
     if (skinny_max_expected < 1) {
-      printk(KERN_ERR PRINTK_PREFIX
+      printk(KERN_ERR PFX
              "Module parameter skinny_max_expected must be 1 or more. "
              "Abandoning module installation.\n");
       return -EINVAL;
     }
     if (skinny_timeout < SKINNY_TIMEOUT_REASONABLE_MIN) {
-      printk(KERN_INFO PRINTK_PREFIX
+      printk(KERN_INFO PFX
              "Module parameter skinny_timeout is perhaps too low at less "
              "than %d seconds. Proceeeding regardless.\n",
              SKINNY_TIMEOUT_REASONABLE_MIN);
@@ -667,7 +688,7 @@ nf_test_init(void)
       /* If they even see this message then the author of printk() has
        * done fine work.
        */
-      printk(KERN_ERR PRINTK_PREFIX
+      printk(KERN_ERR PFX
              "Insufficient kernel memory for 64KB packet parsing buffer. "
              "Abandoning module installation.\n");
       return -ENOMEM;
@@ -689,7 +710,7 @@ nf_test_init(void)
     /* Register this connection tracking helper. */
     problems = nf_conntrack_helper_register(&helper);
     if (problems) {
-      printk(KERN_WARNING PRINTK_PREFIX
+      printk(KERN_WARNING PFX
              "Failed to register connection tracking for TCP/IPv4 port %u. "
              "Abandoning module installation.\n",
              skinny_port);
@@ -698,7 +719,7 @@ nf_test_init(void)
       kfree(skinny_buffer);
       skinny_buffer = NULL;
     } else {
-      printk(KERN_INFO PRINTK_PREFIX
+      printk(KERN_INFO PFX
              "Module installed with parameters skinny_port %u, "
              "skinny_max_expected %u, "
              "skinny_timeout %u.\n",
@@ -721,7 +742,7 @@ nf_test_exit(void)
     kfree(skinny_buffer);
     skinny_buffer = NULL;
   }
-  printk(KERN_INFO PRINTK_PREFIX "Module removed.\n");
+  printk(KERN_INFO PFX "Module removed.\n");
 }
 
 module_init(nf_test_init);
