@@ -123,7 +123,7 @@ struct __attribute__((__packed__)) skinny_msg_id {
     /* Message type. Identifies the purpose and structure of the
      * protocol data unit.
      */
-    __le16 msg_id;
+    __le32 msg_id;
 };
 
 #define SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH 16
