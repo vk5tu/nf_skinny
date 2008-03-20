@@ -498,7 +498,7 @@ parse_skinny_packet(struct sk_buff *matching_skb,
      * Accept the packet unless a subordinate parser says to toss it.
      */
     pdu_offset = skinny_offset;
-    while (pdu_offset <= skinny_length && !problems) {
+    while (pdu_offset < skinny_length && !problems) {
         problems = parse_skinny_pdu(matching_skb,
                                     &pdu_offset,
                                     skinny_length,
