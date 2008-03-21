@@ -19,6 +19,18 @@
  * 
  * You should have received a copy of the GNU General Public License
  * along with nf_skinny.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ *
+ * Note carefully that there is no public specification for Skinny.  A
+ * lot of this file is educated guesswork verified by experimentation
+ * and builds upon similar work in other openly-licensed software.
+ *
+ * As far as they are known, message and field names use the same
+ * names as used in Cisco Systems' documentation, except that
+ * StuddlyCapsNames are given as bsd_style_names. If you have seen
+ * different field names in the log files of a Call Manager than
+ * please let me know and I'll correct this code.
+ *
  */
 
 #ifndef _NF_CONNTRACK_SKINNY_H
@@ -26,6 +38,13 @@
 
 #include <linux/netfilter/nf_conntrack_common.h>
 
+/* The Skinny protocol uses a TCP/IP control connection from the IP
+ * Phone to the Call Manager. This connection is used to negotiate
+ * RTP/UDP/IP voice streams when a phone call is placed or
+ * received. Regular keep-alives are also sent across the control
+ * connection so the Call Manager knows if the IP Phone is alive and
+ * ready for calls which may be placed to it.
+*/
 #define SKINNY_CONTROL_TCP_PORT 2000
 
 #ifdef __KERNEL__
@@ -52,13 +71,13 @@
 #define SKINNY_TIMEOUT 3600
 #define SKINNY_TIMEOUT_REASONABLE_MIN 100
 
-/* The Skinny protocol may have multiple protocol data units with
+/* The Skinny protocol may have multiple protocol data units within
  * one TCP packet. The stream of Skinny PDUs looks like this:
  *   msg_len link_msg_type ... msg_len link_msg_type ...
  * The msg_len is the number of bytes in ...
  * The link_msg_type specifies the encryption or compression of the
  * payload. Only 0 has been seen in the wild, meaning plain text.  If
- * other vaules are seen then this PDU cannot be safely decoded.
+ * other vaules are seen then the PDU cannot be safely decoded.
  *
  * In all packets seen to date the first 4 bytes of ... are the
  * msg_id. This is the function of the PDU. Note carefully that the
@@ -73,14 +92,11 @@
  * order"). The representation of UDP Port is a bizaare combination of
  * both.
  *
- * Field string values are left aligned and '\0' padded. There is no
- * terminating '\0'.
+ * Field string values appear to be left aligned and '\0'
+ * padded. There is not necessarily a terminating '\0'.
+ *
  */
 
-/* As far as they are known, message and field names use the same
- * names as used in Cisco Systems' documentation, except that
- * StuddlyCapsNames are given as bsd_style_names.
- */
 
 /* Message IDs that contain network addresses or ports and thus need
  * to come to the attention of Network Address Translation.  In the
@@ -108,6 +124,11 @@ struct __attribute__((__packed__)) skinny_tcp_msg_header {
      * allow all of the fields in the struct skinny_...  messsage
      * descriptions below to be valid. This is because the message
      * definitions can grow over time.
+     *
+     * Since there is no specifiation we do not know if msg_len==0 is
+     * valid traffic. Allowing for this value complicates parsing, but
+     * not allowing this value might suppress important but empty
+     * traffic (such as some sort of keepalive).
      */
     __le32 msg_len;
 
@@ -120,35 +141,50 @@ struct __attribute__((__packed__)) skinny_tcp_msg_header {
 };
 
 struct __attribute__((__packed__)) skinny_msg_id {
-    /* Message type. Identifies the purpose and structure of the
-     * protocol data unit.
+    /* Message identifier contains the purpose and structure of the
+     * remainder of this protocol data unit.
      */
     __le32 msg_id;
 };
 
 #define SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH 16
 struct __attribute__((__packed__)) skinny_station_register {
-    /* Device name is left-justified, SPace or NUL filled.
-     * There is no NUL terminator.
+    /* Device name is left-justified, NUL filled. There is not
+     * necessarily a NUL terminator.
      */
     char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
     __le32 station_user_id;
     __le32 station_instance;
     __be32 ip_address;
-    /* These are in the message, but after the data we need for NAT,
-     * so if a short message does not include this data we can still
-     * proceed.
-     */
+    /* End of data required for connection tracking. */
+    /* Device type indicates the make and model of the IP Phone. */
     __le32 device_type;
+    /*
+     * Maximum streams is the call-handling capacity of the IP Phone.
+     */
     __le32 max_streams;
 };
+/* There is a coding trick used for writing a parser using this
+ * header. Not all of the contents of a protocol data unit need to
+ * appear, as msg_len could be shorter than the length of the full
+ * PDU. But C allows a pointer to a structure to point to memory which
+ * is less than the size of that structure as long as the overhanging
+ * data is not read or written.
+ *
+ * This trick allows us to pull in msg_len worth of data, check that
+ * the elements of the structure that interest us are less than
+ * msg_len, and read out those elements. The USEFUL_LENGTH macros for
+ * each structure give the minimum msg_len which is needed for
+ * connection tracking and NAT.
+ */
 #define SKINNY_STATION_REGISTER_USEFUL_LENGTH \
         offsetof(struct skinny_station_register, device_type)
 
 struct __attribute__((__packed__)) skinny_station_ip_port {
     /* 16 bit UDP port in a 32-bit field in this odd sequence of bytes:
      *  PORT_MSB PORT_LSB 00 00
-     * The trailing bytes have always been observed to be zero.
+     * The trailing bytes have always been observed to be zero and are
+     * presumed to fill the value to a 4-byte boundary.
      */
     __be16 udp_port;
     __u16 expected_to_be_zero;
@@ -170,10 +206,7 @@ struct __attribute__((__packed__)) skinny_open_receive_channel_ack {
 #define SKINNY_OPEN_RECEIVE_CHANNEL_ACK_USEFUL_LENGTH \
         offsetof(struct skinny_open_receive_channel_ack, expected_to_be_zero)
 
-/* When we implement QoS we will also need Precedence from this
- * message, as that contains the DSCP that should be used for Skinny
- * RTP traffic out the interface this packet arrives on.
- */
+
 struct __attribute__((__packed__)) skinny_start_media_transmission {
     __le32 conference_id;
     __le32 pass_thru_party_id;
@@ -191,6 +224,10 @@ struct __attribute__((__packed__)) skinny_start_media_transmission {
     __le16 max_frames_per_packet;
     __le32 g723_bit_rate;
 };
+/* When we implement QoS we will also need Precedence from this
+ * message, as that contains the DSCP that should be used for Skinny
+ * RTP traffic out the interface this packet arrives on.
+ */
 #define SKINNY_START_MEDIA_TRANSMISSION_USEFUL_LENGTH \
         offsetof(struct skinny_start_media_transmission_length, \
                  expected_to_be_zero)
