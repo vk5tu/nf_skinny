@@ -166,6 +166,8 @@ str_tidy(char *str, size_t length)
 
 /* Parse a Station Register message.
  *
+
+ *
  * Returns: !0: do not parse further PDUs in this packet.
  */
 static int
@@ -178,11 +180,6 @@ parse_station_register(struct sk_buff *matching_skb,
     struct skinny_station_register *station_register;
     struct skinny_station_register station_register_buffer;
     char device_name[SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH];
-    u_int32_t station_user_id;
-    u_int32_t station_instance;
-    u_int32_t ip_address;
-    u_int32_t device_type;
-    u_int32_t max_streams;
     
     printk("parse_station_register\n");
     printk("parse_station_register() offset = %u\n", offset);
@@ -208,23 +205,25 @@ parse_station_register(struct sk_buff *matching_skb,
         return !0;
     }
 
+    /* It's not clear what we can usefully do with this packet for
+     * connection tracking (as opposed to NAT). Archiving the
+     * device_name, instance and user would be very useful for user
+     * debugging and archiving the device_type is useful information
+     * should this module act oddly with a particular model of phone.
+     */
     memcpy(device_name,
            station_register->device_name,
            SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH);
     str_tidy(device_name, SKINNY_STATION_REGISTER_DEVICE_NAME_LENGTH);
-    printk("station register: device name = %s\n", device_name);
-    station_user_id = le32_to_cpu(station_register->station_user_id);
-    printk("station register: station user id = %u\n", station_user_id);
-    station_instance = le32_to_cpu(station_register->station_instance);
-    printk("station register: station instance = %u\n", station_instance);
-    ip_address = ntohl(station_register->ip_address);
-    printk("station register: ip address = " NIPQUAD_FMT "\n",
-           HIPQUAD(ip_address));
-    device_type = le32_to_cpu(station_register->device_type);
-    printk("station register: device type = %u\n", device_type);
-    max_streams = le32_to_cpu(station_register->max_streams);
-    printk("station register: max_streams = %u\n", max_streams);
-
+    printk(KERN_INFO PFX
+           "User %u on station %s, instance %u, model %u at " NIPQUAD_FMT
+           " is registering to " NIPQUAD_FMT ".\n",
+           le32_to_cpu(station_register->station_user_id),
+           device_name,
+           le32_to_cpu(station_register->station_instance),
+           le32_to_cpu(station_register->device_type),
+           NIPQUAD(ct->tuplehash[CTINFO2DIR(ct_info)].tuple.src.u3),
+           NIPQUAD(ct->tuplehash[CTINFO2DIR(ct_info)].tuple.dst.u3));
     return 0;
 }
 
@@ -251,10 +250,6 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     int problems;
     enum ip_conntrack_dir direction = CTINFO2DIR(ct_info);
 
-    printk("parse_station_ip_port\n");
-    printk("parse_station_ip_port() offset = %u\n", offset);
-    printk("parse_station_ip_port() end_offset = %u\n", end_offset);
-
     station_ip_port = skb_header_pointer(
                            matching_skb,
                            offset,
@@ -265,9 +260,6 @@ parse_station_ip_port(struct sk_buff *matching_skb,
         return !0;
     }
 
-    printk("station register: udp port = %u\n",
-           ntohs(station_ip_port->udp_port));
-
     /* Establish an expectation that UDP traffic to the port in the
      * StationIpPort protocol data unit will appear in the reverse
      * direction to the Skinny control connection.
@@ -276,12 +268,6 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     if (!expect) {
         return 0;
     }
-    printk("nf_ct_expect_init("
-           "src ipv4:" NIPQUAD_FMT ",udp:* --> "
-           "dst ipv4:" NIPQUAD_FMT ",udp:%u)\n",
-           NIPQUAD(ct->tuplehash[direction].tuple.dst.u3),
-           NIPQUAD(ct->tuplehash[direction].tuple.src.u3),
-           ntohs(station_ip_port->udp_port));
     nf_ct_expect_init(expect,
                       ct->tuplehash[direction].tuple.src.l3num,
                       &ct->tuplehash[direction].tuple.dst.u3,
@@ -289,9 +275,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
                       IPPROTO_UDP,
                       NULL,  /* Any UDP source port. */
                       &station_ip_port->udp_port);
-    expect->dir = (direction == IP_CT_DIR_ORIGINAL) ?
-        IP_CT_DIR_REPLY :
-        IP_CT_DIR_ORIGINAL;
+    expect->dir = !direction;
     problems = nf_ct_expect_related(expect);
     if (problems) {
         if (net_ratelimit()) {
