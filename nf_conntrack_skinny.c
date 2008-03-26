@@ -272,18 +272,17 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     if (!expect) {
         return 0;
     }
-    printk("nf_ct_expect_init: "
-           "src l3 %u " NIPQUAD_FMT " udp *"
-           "dst " NIPQUAD_FMT " udp %u\n",
-           ntohs(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num),
-           NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3),
+    printk("nf_ct_expect_init("
+           "src ipv4:" NIPQUAD_FMT ",udp:* --> "
+           "dst ipv4:" NIPQUAD_FMT ",udp:%u)\n",
            NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3),
+           NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3),
            ntohs(station_ip_port->udp_port));
     
     nf_ct_expect_init(expect,
                       ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num,
-                      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3,
                       &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3,
+                      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3,
                       IPPROTO_UDP,
                       NULL,  /* Any UDP source port. */
                       &station_ip_port->udp_port);
