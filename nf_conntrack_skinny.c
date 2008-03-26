@@ -172,7 +172,8 @@ static int
 parse_station_register(struct sk_buff *matching_skb,
                        unsigned int offset,
                        unsigned int end_offset,
-                       enum ip_conntrack_dir direction)
+                       struct nf_conn *ct,
+                       enum ip_conntrack_info ct_info)
 {
     struct skinny_station_register *station_register;
     struct skinny_station_register station_register_buffer;
@@ -224,10 +225,6 @@ parse_station_register(struct sk_buff *matching_skb,
     max_streams = le32_to_cpu(station_register->max_streams);
     printk("station register: max_streams = %u\n", max_streams);
 
-
-    /* Extract IP address */
-    /* Set up conntrack */
-
     return 0;
 }
 
@@ -245,12 +242,12 @@ static int
 parse_station_ip_port(struct sk_buff *matching_skb,
                       unsigned int offset,
                       unsigned int end_offset,
-                      enum ip_conntrack_dir direction)
+                      struct nf_conn *ct,
+                      enum ip_conntrack_info ct_info)
 {
     struct skinny_station_ip_port *station_ip_port;
     struct skinny_station_ip_port station_ip_port_buffer;
-    u_int16_t udp_port;
-    struct nf_conntrack_expect expect;
+    struct nf_conntrack_expect *expect;
 
     printk("parse_station_ip_port\n");
     printk("parse_station_ip_port() offset = %u\n", offset);
@@ -266,34 +263,25 @@ parse_station_ip_port(struct sk_buff *matching_skb,
         return !0;
     }
 
-    /* Extract Port */
-    udp_port = ntohs(station_ip_port->udp_port);
-    printk("station register: udp port = %u\n", (unsigned)udp_port);
+    printk("station register: udp port = %u\n",
+           ntohs(station_ip_port->udp_port));
 
     /* Set up conntrack */
-#if 0
-    memset(&expect, 0, sizeof(struct nf_conntrack_expect));
-    LOCK_BH(&expect_lock);
-    expect.seq
-    expect.tuple.src.ip = htonl(ct->tuplehash[!dir].tuple.src.ip);
-    expect.mask.src.ip = __constant_htonl(0xffffffff);
-    expect.tuple.dst.ip = htonl(ct->tuplehash[dir].tuple.src.ip);
-    expect.mask.dst.ip  = __constant_htonl(0xffffffff);
-    /* Do we need the other UDP port here? */
-    expect.tuple.dst.u.udp.port = htons(udp_port);
-    expect.mask.dst.u.udp.port  = __constant_htons(0xffff);
-    expect.tuple.dst.protonum = IPPROTO_UDP;
-    expect.mask.dst.protonum  = 0xffff;
-    expect.expectfn = NULL;
-    expect.master = ct;
-
-    problems = ip_conntrack_expect_related(ct, &expect);
-    UNLOCK_BH(expect_lock);
-    if (problems) {
-        printk(KERN_INFO PFX "Request for connection tracking failed.\n");
+    expect = nf_ct_expect_alloc(ct);
+    if (!expect) {
         return 0;
     }
-#endif    
+    nf_ct_expect_init(expect,
+                      ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.l3num,
+                      &ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3,
+                      &ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3,
+                      IPPROTO_UDP,
+                      NULL,
+                      &station_ip_port->udp_port);
+    if (nf_ct_expect_related(expect)) {
+        printk(KERN_INFO PFX "Request for prefix tracking failed.\n");
+        return 0;
+    }
 
     return 0;
 }
@@ -307,7 +295,8 @@ static int
 parse_open_receive_channel_ack(struct sk_buff *matching_skb,
                                unsigned int offset,
                                unsigned int length,
-                               enum ip_conntrack_dir direction)
+                               struct nf_conn *ct,
+                               enum ip_conntrack_info ct_info)
 {
     struct skinny_open_receive_channel_ack *open_receive_channel_ack;
     struct skinny_open_receive_channel_ack open_receive_channel_ack_buffer;
@@ -339,7 +328,8 @@ static int
 parse_start_media_transmission(struct sk_buff *matching_skb,
                                unsigned int offset,
                                unsigned int length,
-                               enum ip_conntrack_dir direction)
+                               struct nf_conn *ct,
+                               enum ip_conntrack_info ct_info)
 {
     struct skinny_start_media_transmission *start_media_transmission;
     struct skinny_start_media_transmission start_media_transmission_buffer;
@@ -379,7 +369,8 @@ static int
 parse_skinny_pdu(struct sk_buff *matching_skb,
                  unsigned int *skinny_offset,
                  unsigned int skinny_length,
-                 enum ip_conntrack_dir direction)
+                 struct nf_conn *ct,
+                 enum ip_conntrack_info ct_info)
 {
     struct skinny_tcp_msg_header *tcp_msg_header;
     struct skinny_tcp_msg_header tcp_msg_header_buffer;
@@ -502,26 +493,39 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         problems = parse_station_register(matching_skb,
                                           offset,
                                           end_offset,
-                                          direction);
+                                          ct,
+                                          ct_info);
         break;
     case SKINNY_MSG_ID_STATION_IP_PORT:
         problems = parse_station_ip_port(matching_skb,
                                          offset,
                                          end_offset,
-                                         direction);
+                                         ct,
+                                         ct_info);
         break;
     case SKINNY_MSG_ID_OPEN_RECEIVE_CHANNEL_ACK:
         problems = parse_open_receive_channel_ack(matching_skb,
                                                   offset,
                                                   end_offset,
-                                                  direction);
+                                                  ct,
+                                                  ct_info);
         break;
     case SKINNY_MSG_ID_START_MEDIA_TRANSMISSION:
         problems = parse_start_media_transmission(matching_skb,
                                                   offset,
                                                   end_offset,
-                                                  direction);
+                                                  ct,
+                                                  ct_info);
         break;
+
+#if 0
+    case SKINNY_MSG_ID_KEEPALIVE:
+        /* Keep alive packets call nf_ct_refresh() so that connections
+         * don't time out. This allows the NAT timeout to be dropped
+         * to ~100s from 1 hour.
+         */
+        break;
+#endif
     }
 
     *skinny_offset = end_offset;
@@ -541,7 +545,8 @@ static int
 parse_skinny_packet(struct sk_buff *matching_skb,
                     unsigned int skinny_offset,
                     unsigned int skinny_length,
-                    enum ip_conntrack_dir direction)
+                    struct nf_conn *ct,
+                    enum ip_conntrack_info ct_info)
 {
     unsigned int pdu_offset;
     int problems = 0;
@@ -554,7 +559,8 @@ parse_skinny_packet(struct sk_buff *matching_skb,
         problems = parse_skinny_pdu(matching_skb,
                                     &pdu_offset,
                                     skinny_length,
-                                    direction);
+                                    ct,
+                                    ct_info);
     }
     return NF_ACCEPT;
 }
@@ -639,7 +645,8 @@ skinny_conntrack_helper(struct sk_buff *matching_skb,
     ret = parse_skinny_packet(matching_skb,
                               skinny_offset,
                               matching_skb->len,
-                              CTINFO2DIR(conntrack_info));
+                              ct,
+                              conntrack_info);
 
  unlock_end:
     spin_unlock_bh(&skinny_buffer_lock);
