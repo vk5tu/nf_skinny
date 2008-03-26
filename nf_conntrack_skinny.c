@@ -248,6 +248,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     struct skinny_station_ip_port *station_ip_port;
     struct skinny_station_ip_port station_ip_port_buffer;
     struct nf_conntrack_expect *expect;
+    int problems;
 
     printk("parse_station_ip_port\n");
     printk("parse_station_ip_port() offset = %u\n", offset);
@@ -271,15 +272,31 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     if (!expect) {
         return 0;
     }
+    printk("nf_ct_expect_init: "
+           "src l3 %u " NIPQUAD_FMT " udp *"
+           "dst " NIPQUAD_FMT " udp %u\n",
+           ntohs(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num),
+           NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3),
+           NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3),
+           ntohs(station_ip_port->udp_port));
+    
     nf_ct_expect_init(expect,
-                      ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.l3num,
-                      &ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3,
-                      &ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3,
+                      ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num,
+                      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3,
+                      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3,
                       IPPROTO_UDP,
-                      NULL,
+                      NULL,  /* Any UDP source port. */
                       &station_ip_port->udp_port);
-    if (nf_ct_expect_related(expect)) {
-        printk(KERN_INFO PFX "Request for prefix tracking failed.\n");
+    expect->dir = IP_CT_DIR_REPLY;
+    problems = nf_ct_expect_related(expect);
+    if (problems) {
+        printk(KERN_INFO PFX
+               "Request for connection tracking failed with error code %d for "
+               "ipv4:" NIPQUAD_FMT ",udp:* -> ipv4:" NIPQUAD_FMT ",udp:%u.\n",
+               problems,
+               NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3),
+               NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3),
+               ntohs(station_ip_port->udp_port));
         return 0;
     }
 
