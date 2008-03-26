@@ -249,6 +249,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     struct skinny_station_ip_port station_ip_port_buffer;
     struct nf_conntrack_expect *expect;
     int problems;
+    enum ip_conntrack_dir direction = CTINFO2DIR(ct_info);
 
     printk("parse_station_ip_port\n");
     printk("parse_station_ip_port() offset = %u\n", offset);
@@ -267,7 +268,10 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     printk("station register: udp port = %u\n",
            ntohs(station_ip_port->udp_port));
 
-    /* Set up conntrack */
+    /* Establish an expectation that UDP traffic to the port in the
+     * StationIpPort protocol data unit will appear in the reverse
+     * direction to the Skinny control connection.
+     */
     expect = nf_ct_expect_alloc(ct);
     if (!expect) {
         return 0;
@@ -275,30 +279,34 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     printk("nf_ct_expect_init("
            "src ipv4:" NIPQUAD_FMT ",udp:* --> "
            "dst ipv4:" NIPQUAD_FMT ",udp:%u)\n",
-           NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3),
-           NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3),
+           NIPQUAD(ct->tuplehash[direction].tuple.dst.u3),
+           NIPQUAD(ct->tuplehash[direction].tuple.src.u3),
            ntohs(station_ip_port->udp_port));
-    
     nf_ct_expect_init(expect,
-                      ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.l3num,
-                      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3,
-                      &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3,
+                      ct->tuplehash[direction].tuple.src.l3num,
+                      &ct->tuplehash[direction].tuple.dst.u3,
+                      &ct->tuplehash[direction].tuple.src.u3,
                       IPPROTO_UDP,
                       NULL,  /* Any UDP source port. */
                       &station_ip_port->udp_port);
-    expect->dir = IP_CT_DIR_REPLY;
+    expect->dir = (direction == IP_CT_DIR_ORIGINAL) ?
+        IP_CT_DIR_REPLY :
+        IP_CT_DIR_ORIGINAL;
     problems = nf_ct_expect_related(expect);
     if (problems) {
-        printk(KERN_INFO PFX
-               "Request for connection tracking failed with error code %d for "
-               "ipv4:" NIPQUAD_FMT ",udp:* -> ipv4:" NIPQUAD_FMT ",udp:%u.\n",
-               problems,
-               NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3),
-               NIPQUAD(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u3),
-               ntohs(station_ip_port->udp_port));
-        return 0;
+        if (net_ratelimit()) {
+            printk(KERN_INFO PFX
+                   "Request for connection tracking failed with error code %d "
+                   "for ipv4:" NIPQUAD_FMT ",udp:* "
+                   "--> ipv4:" NIPQUAD_FMT ",udp:%u.\n",
+                   problems,
+                   NIPQUAD(ct->tuplehash[direction].tuple.src.u3),
+                   NIPQUAD(ct->tuplehash[direction].tuple.dst.u3),
+                   ntohs(station_ip_port->udp_port));
+        }
     }
-
+    /* The counterpart to nf_ct_expect_alloc(). */
+    nf_ct_expect_put(expect);
     return 0;
 }
 
