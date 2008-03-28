@@ -135,10 +135,10 @@ printk_no_skb_header_pointer(const char *func)
 
 
 /* Take string "str" of allocated size "length", possibly not
- * 0-terminated, possibly filled to the right with trailing
- * spaces. Turn this into a printable 0-terminated string with no
- * trailing spaces. This may truncate the last character, regardless
- * if it is a space or not.
+ * 0-terminated, possibly filled to the right with trailing spaces,
+ * NULs and other non-printable trash. Turn this into a printable
+ * 0-terminated string with no trailing spaces. This may truncate the
+ * last character, regardless if it is a space or not.
  */
 static void 
 str_tidy(char *str, size_t length)
@@ -279,7 +279,7 @@ parse_station_ip_port(struct sk_buff *matching_skb,
     problems = nf_ct_expect_related(expect);
     if (problems) {
         if (net_ratelimit()) {
-            printk(KERN_INFO PFX
+            printk(KERN_INFO PFX "parse_station_ip_port(): "
                    "Request for connection tracking failed with error code %d "
                    "for ipv4:" NIPQUAD_FMT ",udp:* "
                    "--> ipv4:" NIPQUAD_FMT ",udp:%u.\n",
@@ -341,6 +341,9 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
 {
     struct skinny_start_media_transmission *start_media_transmission;
     struct skinny_start_media_transmission start_media_transmission_buffer;
+    struct nf_conntrack_expect *expect;
+    int problems;
+    enum ip_conntrack_dir direction = CTINFO2DIR(ct_info);
 
     printk(KERN_INFO "start_media_transmission\n");
 
@@ -354,11 +357,47 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
         return !0;
     }
 
-    printk(KERN_INFO PFX
-           "start_media_transmission\n");
-    /* Extract Port */
-    /* Set up conntrack */
+    start_media_transmission = skb_header_pointer(
+        matching_skb,
+        offset,
+        sizeof(struct skinny_start_media_transmission),
+        &start_media_transmission_buffer);
+    if (unlikely(!start_media_transmission)) {
+        printk_no_skb_header_pointer(__func__);
+        return !0;
+    }
 
+    /* Establish an expectation that UDP traffic from (ip_address, *)
+     * to (remote_ip_address, remote_udp_port) will appear in the
+     * reverse direction to this message (ie, outgoing).
+     */
+    expect = nf_ct_expect_alloc(ct);
+    if (!expect) {
+        return 0;
+    }
+    nf_ct_expect_init(expect,
+                      ct->tuplehash[direction].tuple.src.l3num,
+                      &ct->tuplehash[direction].tuple.dst.u3,
+                      &start_media_transmission->remote_ip_address,
+                      IPPROTO_UDP,
+                      NULL,
+                      &start_media_transmission->remote_udp_port);
+    expect->dir = !direction;
+    problems = nf_ct_expect_related(expect);
+    if (problems) {
+        if (net_ratelimit()) {
+            printk(KERN_INFO PFX "parse_start_media_transmission(): "
+                   "Request for connection tracking failed with error code %d "
+                   "for ipv4:" NIPQUAD_FMT ",udp:* "
+                   "--> ipv4:" NIPQUAD_FMT ",udp:%u.\n",
+                   problems,
+                   NIPQUAD(ct->tuplehash[direction].tuple.src.u3),
+                   NIPQUAD(ct->tuplehash[direction].tuple.dst.u3),
+                   ntohs(station_ip_port->udp_port));
+        }
+    }
+    /* The counterpart to nf_ct_expect_alloc(). */
+    nf_ct_expect_put(expect);
     return 0;
 }
 
