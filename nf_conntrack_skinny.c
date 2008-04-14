@@ -378,7 +378,7 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
     nf_ct_expect_init(expect,
                       ct->tuplehash[direction].tuple.src.l3num,
                       &ct->tuplehash[direction].tuple.dst.u3,
-                      &start_media_transmission->remote_ip_address,
+                      (union nf_conntrack_address *)start_media_transmission->remote_ip_address,
                       IPPROTO_UDP,
                       NULL,
                       &start_media_transmission->remote_udp_port);
@@ -393,7 +393,7 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
                    problems,
                    NIPQUAD(ct->tuplehash[direction].tuple.src.u3),
                    NIPQUAD(ct->tuplehash[direction].tuple.dst.u3),
-                   ntohs(station_ip_port->udp_port));
+                   ntohs(start_media_transmission->remote_udp_port));
         }
     }
     /* The counterpart to nf_ct_expect_alloc(). */
