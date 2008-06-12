@@ -189,7 +189,7 @@ parse_station_register(struct sk_buff *matching_skb,
         if (net_ratelimit()) {
             printk(KERN_INFO PFX
                    "Station Register message is too short "
-                   "(it is %u-%u bytes, but should be at least %u).\n",
+                   "(it is %u-%u bytes, but should be at least %zu).\n",
                    end_offset,
                    offset,
                    sizeof(struct skinny_station_register));
@@ -449,7 +449,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
     if (offset + sizeof(struct skinny_tcp_msg_header) > end_offset) {
         printk(KERN_INFO PFX
                "Too short for a Skinny packet "
-               "(it is %u-%u, but should be at least %u). "
+               "(it is %u-%u, but should be at least %zu). "
                "Perhaps not Skinny traffic?\n",
                end_offset,
                offset,
@@ -511,7 +511,7 @@ parse_skinny_pdu(struct sk_buff *matching_skb,
         if (likely(net_ratelimit())) {
             printk(KERN_INFO PFX
                    "Message is too short to contain a MsgID "
-                   "(it is %u-%u, but should be at least %u).\n",
+                   "(it is %u-%u, but should be at least %zu).\n",
                    end_offset,
                    offset,
                    sizeof(struct skinny_msg_id));
