@@ -99,3 +99,5 @@ INTELLECTUAL PROPERTY
 
 US patent pending 11/133,407, filed May 19, 2005
 US patent pending, continuation, 20060262916, published 11/23/2006
+
+These don't appear to be relevant at all.
