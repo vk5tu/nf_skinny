@@ -5,7 +5,7 @@ $Id$
 
 PACKAGES REQUIRED FOR BUILD
 
-Fedora 8
+Fedora 8 and 9
 
     # yum install kernel-devel
 

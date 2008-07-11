@@ -139,6 +139,11 @@ printk_no_skb_header_pointer(const char *func)
  * NULs and other non-printable trash. Turn this into a printable
  * 0-terminated string with no trailing spaces. This may truncate the
  * last character, regardless if it is a space or not.
+ *
+ * This allows us to print strings in the protocol without opening
+ * a covert channel attack on the Linux console (eg: someone setting
+ * their phone name to the ANSI codes to set the Return key to
+ * "rm -rf /").
  */
 static void 
 str_tidy(char *str, size_t length)
