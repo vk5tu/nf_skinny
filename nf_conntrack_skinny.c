@@ -382,8 +382,8 @@ parse_start_media_transmission(struct sk_buff *matching_skb,
     }
     nf_ct_expect_init(expect,
                       ct->tuplehash[direction].tuple.src.l3num,
-                      &ct->tuplehash[direction].tuple.dst.u3,
-                      (union nf_conntrack_address *)start_media_transmission->remote_ip_address,
+                      &ct->tuplehash[direction].tuple.src.u3,
+                      (union nf_inet_addr *)&start_media_transmission->remote_ip_address,
                       IPPROTO_UDP,
                       NULL,
                       &start_media_transmission->remote_udp_port);
